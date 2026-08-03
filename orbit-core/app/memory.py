@@ -162,6 +162,23 @@ class MemoryStore:
                 conn.execute("ALTER TABLE semantic_vectors ADD COLUMN conflict_sig TEXT")
             except sqlite3.OperationalError:
                 pass
+            # When the user names a clock time ("the movie is at 5"), keep the resolved UTC
+            # instant. Coarse labels like "today" cannot tell 4 PM from 9 PM, so ORBIT either
+            # asked how something went before it happened, or spoke of a finished thing as
+            # still upcoming. event_date stays for events with no time at all.
+            try:
+                conn.execute("ALTER TABLE life_events ADD COLUMN occurs_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # How long the thing lasts decides when "how was it?" becomes appropriate —
+            # a 150-minute film is still running an hour after a 60-minute default says
+            # it finished.
+            try:
+                conn.execute(
+                    "ALTER TABLE life_events ADD COLUMN duration_minutes INTEGER NOT NULL DEFAULT 60"
+                )
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
 
     def append_turn(self, session_id: str, role: str, content: str) -> None:
@@ -812,6 +829,8 @@ class MemoryStore:
         emotion: Optional[str] = None,
         event_date: Optional[str] = None,
         importance: float = 0.5,
+        occurs_at: Optional[str] = None,
+        duration_minutes: int = 60,
     ) -> None:
         cleaned = summary.strip()
         if not cleaned:
@@ -820,18 +839,30 @@ class MemoryStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO life_events (summary, category, emotion, event_date, importance)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO life_events
+                    (summary, category, emotion, event_date, importance, occurs_at, duration_minutes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (cleaned, category, emotion, event_date, imp),
+                (cleaned, category, emotion, event_date, imp, occurs_at, duration_minutes),
             )
+            conn.commit()
+
+    def mark_life_event_resolved(self, event_id: int) -> None:
+        """Close the loop on an event ORBIT has already followed up on.
+
+        `recent_life_events` filters on `is_resolved = 0`, so this permanently retires the
+        topic. The column existed from the beginning and was never written — which is why
+        the only protection against re-asking was a 48-hour window."""
+        with self._connect() as conn:
+            conn.execute("UPDATE life_events SET is_resolved = 1 WHERE id = ?", (event_id,))
             conn.commit()
 
     def recent_life_events(self, limit: int = 10, days: int = 3) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, summary, category, emotion, event_date, importance, is_resolved, created_at
+                SELECT id, summary, category, emotion, event_date, importance, is_resolved,
+                       created_at, occurs_at, duration_minutes
                 FROM life_events
                 WHERE julianday('now') - julianday(created_at) <= ?
                   AND is_resolved = 0
@@ -844,6 +875,7 @@ class MemoryStore:
             {
                 "id": r[0], "summary": r[1], "category": r[2], "emotion": r[3],
                 "event_date": r[4], "importance": r[5], "is_resolved": r[6], "created_at": r[7],
+                "occurs_at": r[8], "duration_minutes": r[9],
             }
             for r in rows
         ]

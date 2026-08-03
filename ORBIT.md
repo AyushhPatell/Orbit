@@ -1181,6 +1181,76 @@ the fixed backend:
 
 Backend restarted; **Xcode rebuild (Cmd+R) required** for the ears fix. Protocol unchanged.
 
+### Phase 3.17 — DONE (2026-08-03): memory hygiene, test isolation, CI
+
+**The "duplicate turn" bug was never a retry bug — the test suite was writing to the
+production database.** `app.main` binds its `MemoryStore` at import to the live
+`data/orbit.db`, and several tests call endpoint functions directly, so **every `pytest`
+run inserted 12 turns into Ayush's personal memory.** Proven by counting, not inferred:
+
+```
+turns BEFORE pytest: 1402
+turns AFTER  pytest: 1414
+```
+
+**228 rows** had accumulated under the `test-offline` session id (against 1184 real ones).
+The tell was that the identical reply sequence repeated at four timestamps — those were
+test runs, not Ayush. My earlier written guess ("likely the offline/retry path") was wrong.
+Fixed with an autouse session fixture (`tests/conftest.py`) that repoints the store at a
+temp DB; verified delta 0. Rows purged.
+
+**Isolating it exposed a second problem: five tests passed only because Ayush's `.env`
+existed.** `get_settings()` re-reads that file on every call and file values beat the
+environment, so on a clean checkout `brain_api_key` was empty, `chat_tool_result` raised
+503, and the offline-resilience tests never reached the code they claim to cover. The suite
+now pins its own settings and passes with no secrets present.
+
+**Memory hygiene.** Phase 3.6 added the LLM extractor to *replace* regex extraction but
+never stopped the regex writers — both ran on every turn, and **all 16 `personal_knowledge`
+rows were regex-written, zero from the LLM.** That junk was then fed back to the LLM as
+"already known, do not repeat", suppressing the clean version of the same fact. Regex
+extraction is now the no-brain fallback only (both `/chat` *and* `/chat/tool-result` —
+the first cut missed the second), and `is_tool_operation()` structurally drops ORBIT's own
+command log, which the model had been recording as Ayush's life despite the prompt telling
+it not to. Cleanup (approved): 16 rows → **7 curated facts**, 24 life events → **6**.
+
+**CI** (`.github/workflows/ci.yml`): pytest + wake corpus + reminder corpus + an unsigned
+ORBITMac build on every push. First run green. It earned its place immediately — the five
+hidden failures above surfaced only because CI runs against a clean clone.
+
+### Phase 3.18 — DONE (2026-08-03): the event lifecycle, and presence
+
+**Events now have a timeline instead of a day label.** "Spiderman movie at 5 PM today" was
+stored as coarse `today`, which cannot tell 4 PM from 9 PM — so it read as a current plan at
+3 PM, and a follow-up could have arrived before the thing happened. When Ayush names a clock
+time it is resolved to an instant (`occurs_at`, UTC) with a plausible `duration_minutes`, and
+`_lifecycle_phase` places it: **STARTING SOON → HAPPENING RIGHT NOW → JUST FINISHED (a good
+moment to ask how it went) → FINISHED EARLIER TODAY → PAST**. Follow-ups fire only in that
+finished window, so *"how was the movie?"* can only ever arrive **after** the movie. No clock
+time means no instant — the same rule reminders learned in Phase 3.10: never invent an hour.
+
+**`is_resolved` is finally written.** It has existed since the first schema and was never
+set, so a topic ORBIT had already asked about could resurface forever; the 48-hour window only
+deferred the repeat. Once ORBIT actually follows up on a finished event, that loop closes.
+
+**Presence.** *"I am going for a bath now, I will be back in 30 minutes"* now registers as a
+departure, and his next message after a real gap is understood as a return. The wording is
+the brain's, not a canned string (Phase 3.4's lesson) — the prompt gets a note about how long
+he was gone and an explicit instruction not to turn the welcome into a briefing. Guarded
+against the obvious trap: *"I'm going to the gym after my shift"* is a plan for later, not a
+departure. Verified live:
+
+```
+"I am going for a bath now, I'll be back in 30 minutes"
+   → "Sounds good—enjoy your bath! I'll be here when you get back."   [away state recorded]
+28 minutes later, "okay I am back"
+   → "Welcome back! Ready to jump into something or just chilling for now?"
+next message → no second welcome (state consumed)
+```
+
+Verified: **144 pytest**, wake + reminder corpora, CI green, migration applied to the live DB
+with all rows intact. Backend restarted. **No Xcode rebuild needed** — Python only.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias

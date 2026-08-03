@@ -186,6 +186,8 @@ async def run_memory_extraction(session_id: str) -> int:
             emotion=item["emotion"],
             event_date=item["event_date"],
             importance=item["importance"],
+            occurs_at=_resolve_occurs_at(item["event_date"], item.get("at")),
+            duration_minutes=item.get("duration_minutes") or 60,
         )
         stored += 1
 
@@ -215,6 +217,13 @@ def _track_nudge_usage(reply: str, life_events: list) -> None:
             topic_key = summary[:40].lower().strip()
             if not memory.has_asked_about(topic_key, within_hours=48):
                 memory.log_proactive_checkin(topic_key, reply[:100])
+            # Closing the loop: once ORBIT has actually followed up on a finished event,
+            # that topic is retired for good. The 48-hour window only ever deferred the
+            # repeat; `is_resolved` has existed since the first schema and was never
+            # written, so nothing ever truly ended.
+            event_id = ev.get("id")
+            if event_id and reply.rstrip().endswith("?"):
+                memory.mark_life_event_resolved(event_id)
 
 
 def _get_nudge_candidates(life_events: list, current_hour: int) -> list[str]:
@@ -222,10 +231,10 @@ def _get_nudge_candidates(life_events: list, current_hour: int) -> list[str]:
     candidates = []
     for ev in life_events:
         temporal = _temporal_label(ev, current_hour)
-        # Follow-ups belong to things that have HAPPENED: past events, or a morning plan
-        # that by evening is likely done ("how was breakfast?" at night — never a recital
-        # of it as current at 3 PM).
-        if not any(k in temporal for k in ("PAST", "JUST FINISHED", "LIKELY DONE")):
+        # Follow-ups belong to things that have HAPPENED. With a known instant this is
+        # exact: "JUST FINISHED" is the natural moment to ask, and an event still
+        # UPCOMING or HAPPENING RIGHT NOW can never be asked about in the past tense.
+        if not any(k in temporal for k in ("PAST", "JUST FINISHED", "LIKELY DONE", "FINISHED")):
             continue
         summary = ev.get("summary", "")
         topic_key = summary[:40].lower().strip()
@@ -337,6 +346,80 @@ def _age_phrase(created: str, *, now=None) -> str:
     return "yesterday" if days == 1 else f"{days} days ago"
 
 
+def _resolve_occurs_at(
+    event_date: Optional[str], clock: Optional[str], *, created=None
+) -> Optional[str]:
+    """Turn ("today", "17:00") into a UTC instant, using the day the user said it.
+
+    Returns a "%Y-%m-%d %H:%M:%S" UTC string, or None when no clock time was spoken —
+    a guessed hour is exactly the failure Phase 3.10 removed from reminders, and it has
+    no place in memory either. The wall clock is the user's local time (the backend runs
+    on his Mac), converted to UTC for storage alongside SQLite's CURRENT_TIMESTAMP.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if not clock:
+        return None
+    try:
+        hour, minute = (int(part) for part in clock.split(":"))
+    except (ValueError, AttributeError):
+        return None
+
+    base_utc = created or datetime.utcnow()
+    # Interpret the spoken day against the user's local calendar, not UTC's.
+    local_base = base_utc.replace(tzinfo=timezone.utc).astimezone()
+    day = local_base.date()
+    if event_date == "tomorrow":
+        day += timedelta(days=1)
+    elif event_date == "weekend":
+        day += timedelta(days=(5 - local_base.weekday()) % 7)
+    elif event_date == "next-week":
+        day += timedelta(days=7 - local_base.weekday())
+    elif event_date == "past":
+        return None
+
+    local_dt = datetime(day.year, day.month, day.day, hour, minute).astimezone()
+    return local_dt.astimezone(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _lifecycle_phase(occurs_at: str, *, duration_minutes: int = 60, now=None) -> Optional[str]:
+    """Where an event sits on its own timeline: upcoming → now → just finished → past.
+
+    This is what lets ORBIT ask "how was the movie?" *after* the movie and never before.
+    The follow-up window opens when the thing plausibly ended and closes overnight, so a
+    stale question doesn't surface days later.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        start = datetime.strptime(occurs_at, "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    current = now or datetime.utcnow()
+    end = start + timedelta(minutes=duration_minutes)
+
+    if current < start:
+        minutes_away = (start - current).total_seconds() / 60
+        if minutes_away <= 90:
+            return "STARTING SOON"
+        hours_away = minutes_away / 60
+        if hours_away <= 12:
+            return f"UPCOMING in about {int(round(hours_away))}h — has NOT happened yet"
+        days_away = (start.date() - current.date()).days
+        if days_away <= 1:
+            return "UPCOMING TOMORROW — has NOT happened yet"
+        return f"UPCOMING in {days_away} days — has NOT happened yet"
+    if current <= end:
+        return "HAPPENING RIGHT NOW"
+    since_end_hours = (current - end).total_seconds() / 3600
+    if since_end_hours <= 8:
+        return "JUST FINISHED — a good moment to ask how it went"
+    if current.date() == start.date():
+        return "FINISHED EARLIER TODAY"
+    days = (current.date() - start.date()).days
+    return "PAST (yesterday)" if days == 1 else f"PAST ({days} days ago)"
+
+
 def _temporal_label(event: dict, current_hour: int, *, now=None) -> str:
     """Label a life event relative to the clock that matters: the one ticking NOW.
 
@@ -360,6 +443,18 @@ def _temporal_label(event: dict, current_hour: int, *, now=None) -> str:
         created_dt = current
     age = _age_phrase(created, now=current)
     today = current.date()
+
+    # A known instant beats every heuristic below: "the movie at 5" is upcoming at 4,
+    # happening at 6, and worth asking about at 9 — none of which a day label can express.
+    occurs_at = event.get("occurs_at")
+    if occurs_at:
+        phase = _lifecycle_phase(
+            occurs_at,
+            duration_minutes=event.get("duration_minutes") or 60,
+            now=current,
+        )
+        if phase:
+            return phase
 
     # Resolve the spoken date word against the day it was said, producing a window.
     start = end = None
@@ -416,6 +511,117 @@ def _temporal_label(event: dict, current_hour: int, *, now=None) -> str:
     if cat == "plan":
         return f"SHARED PLAN (shared {age})"
     return f"RECENT (shared {age})"
+
+
+_AWAY_KEY = "presence.away"
+
+_DEPARTURE_PATTERNS = (
+    r"\b(?:brb|be right back)\b",
+    r"\b(?:i'?ll\s+be\s+|be\s+|)back\s+in\s+(?:a\s+)?(?:\d+|a\s+few|half|an?|couple)\b",
+    r"\bgoing\s+(?:for|to\s+take|to\s+have)\s+(?:a|an)\s+"
+    r"(?:bath|shower|nap|walk|run|jog|smoke|break|coffee)\b",
+    r"\b(?:stepping|heading|popping|nipping)\s+out\b",
+    r"\bgoing\s+out\s+(?:for|to)\b",
+    r"\b(?:gotta|got\s+to|have\s+to|need\s+to)\s+(?:go|run|head\s+out)\b",
+    r"\btalk\s+(?:to\s+you\s+)?(?:later|in\s+a\s+bit)\b",
+)
+
+_DURATION_RE = re.compile(
+    r"\b(?:in|for)\s+(?:about\s+|around\s+)?"
+    r"(?:(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)"
+    r"|(?:a\s+)?(half\s+an?\s+hour|an\s+hour|a\s+couple\s+of\s+hours|a\s+few\s+minutes))",
+    re.IGNORECASE,
+)
+
+
+def _departure_minutes(text: str) -> Optional[int]:
+    """How long he said he'd be gone, in minutes, or None if he didn't say."""
+    match = _DURATION_RE.search(text)
+    if not match:
+        return None
+    if match.group(1):
+        amount = int(match.group(1))
+        unit = (match.group(2) or "").lower()
+        minutes = amount * 60 if unit.startswith(("hour", "hr")) else amount
+        return max(1, min(12 * 60, minutes))
+    phrase = (match.group(3) or "").lower()
+    if "half" in phrase:
+        return 30
+    if "couple" in phrase:
+        return 120
+    if "few" in phrase:
+        return 5
+    return 60
+
+
+def detect_departure(text: str) -> Optional[dict]:
+    """True when he is telling ORBIT he's stepping away *now* — not describing a plan.
+
+    "I'm going for a bath, back in 30" is a departure. "I'm going to the gym after my
+    shift" is a plan for later and must not be mistaken for one, or ORBIT would greet him
+    back while he is still sitting there.
+    """
+    t = text.lower().strip()
+    if not any(re.search(p, t) for p in _DEPARTURE_PATTERNS):
+        return None
+    # A future-time marker means he is describing a plan, unless he also gave a return time.
+    later_markers = (
+        "after my shift", "after work", "tomorrow", "tonight", "later today",
+        "next week", "this weekend", "on monday", "on tuesday", "on wednesday",
+        "on thursday", "on friday", "on saturday", "on sunday",
+    )
+    minutes = _departure_minutes(t)
+    if minutes is None and any(m in t for m in later_markers):
+        return None
+    return {"minutes": minutes, "said": text.strip()[:160]}
+
+
+def presence_note_on_return(raw_state: str, *, now=None) -> Optional[str]:
+    """Context for the brain when he speaks again after stepping away.
+
+    Deliberately a *note*, not a canned line: Phase 3.4 removed fixed greeting strings
+    because they made ORBIT sound like a machine. The brain decides the words; this only
+    tells it what happened, so "welcome back" can carry real content ("that was quick",
+    "how was it?").
+    """
+    from datetime import datetime
+
+    try:
+        state = json.loads(raw_state)
+        left_at = datetime.strptime(state["at"], "%Y-%m-%d %H:%M:%S")
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return None
+
+    current = now or datetime.utcnow()
+    gone_minutes = (current - left_at).total_seconds() / 60
+    # Under a few minutes he never actually left — he is still in the same exchange.
+    if gone_minutes < 3:
+        return None
+    if gone_minutes > 12 * 60:
+        return None  # too long to still be "back in a moment"
+
+    if gone_minutes < 60:
+        away_phrase = f"about {int(round(gone_minutes))} minutes"
+    else:
+        hours = gone_minutes / 60
+        away_phrase = f"about {hours:.1f} hours".replace(".0", "")
+
+    note = (
+        f'He stepped away {away_phrase} ago, saying: "{state.get("said", "")}". '
+        "This is his first message since. Acknowledge that he's back in ONE short, natural "
+        "clause before answering him — the way a friend would look up and say hi. "
+    )
+    expected = state.get("minutes")
+    if expected:
+        if gone_minutes < expected * 0.6:
+            note += "He's back sooner than he said, which is worth a light touch. "
+        elif gone_minutes > expected * 2:
+            note += "He was gone quite a bit longer than he expected. "
+    note += (
+        "Do NOT list his plans, reminders or schedule — he only just walked back in. "
+        "If what he was doing invites a one-line question, that's welcome, but keep it short."
+    )
+    return note
 
 
 def _is_conversational_opener(text: str) -> bool:
@@ -526,6 +732,7 @@ def build_messages(
     recent_turns: Optional[list[Message]] = None,
     semantic_hits: Optional[list[str]] = None,
     style_prefs: Optional[dict[str, float]] = None,
+    presence_note: Optional[str] = None,
 ) -> list[Message]:
     profile = load_profile(profile_path)
     recent = recent_turns if recent_turns is not None else memory.recent_turns(session_id=session_id, limit=8)
@@ -812,6 +1019,9 @@ def build_messages(
         profile
         + "\nDefault to concise replies: usually 2-4 sentences. Expand only when the user asks for depth, planning, or step-by-step detail."
     )
+    if presence_note:
+        profile += "\n\n### He just came back\n" + presence_note + "\n"
+
     adaptive_style = adaptive_style_prompt_block(recent, user_message, style_prefs=style_prefs)
     if adaptive_style:
         profile = (
@@ -1344,6 +1554,14 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         if s.semantic_memory_enabled
         else []
     )
+    # Presence: if he told ORBIT he was stepping away, his next message is a return.
+    presence_note = None
+    stored_away = memory.get_meta(_AWAY_KEY, "")
+    if stored_away:
+        presence_note = presence_note_on_return(stored_away)
+        if presence_note:
+            memory.set_meta(_AWAY_KEY, "")
+
     messages = build_messages(
         payload.session_id,
         payload.message,
@@ -1356,6 +1574,7 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         recent_turns=recent_turns,
         semantic_hits=semantic_hits,
         style_prefs=style_prefs,
+        presence_note=presence_note,
     )
 
     model: Optional[str] = None
@@ -1607,6 +1826,15 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         tooling_context=payload.tooling_context,
         client_local_iso=payload.client_local_iso,
     )
+
+    departure = detect_departure(payload.message)
+    if departure and payload.save_memory:
+        from datetime import datetime as _dt
+        memory.set_meta(_AWAY_KEY, json.dumps({
+            "at": _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "minutes": departure["minutes"],
+            "said": departure["said"],
+        }))
 
     user_for_store = content_for_storage(payload.message, redact_local_storage=s.redact_local_storage)
     reply_for_store = content_for_storage(reply, redact_local_storage=s.redact_local_storage)

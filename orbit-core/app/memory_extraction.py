@@ -42,7 +42,7 @@ recent conversation and recording what is worth remembering about the user long-
 Return ONLY a JSON object of this exact shape:
 {
   "knowledge": [{"category": "...", "fact": "...", "importance": 0.0-1.0}],
-  "events":    [{"summary": "...", "category": "plan|feeling|life-update", "emotion": "positive|negative|stressed|low-energy|null", "when": "today|tomorrow|weekend|next-week|past|null", "importance": 0.0-1.0}]
+  "events":    [{"summary": "...", "category": "plan|feeling|life-update", "emotion": "positive|negative|stressed|low-energy|null", "when": "today|tomorrow|weekend|next-week|past|null", "at": "HH:MM 24-hour local clock time, or null", "duration_minutes": 30, "importance": 0.0-1.0}]
 }
 
 "knowledge" = durable facts that stay true for weeks or months.
@@ -64,6 +64,10 @@ Rules:
   nothing but ORBIT operating the machine, return empty arrays.
 - Do NOT repeat anything in the "Already known" list.
 - One clean fact is better than five noisy ones. Empty arrays are a perfectly good answer.
+- Set "at" ONLY when the user actually named a clock time ("the movie is at 5", "gym at
+  seven"). Never guess an hour. "at": null is correct for "sometime this evening".
+- "duration_minutes" is how long the thing plausibly takes (a movie ~150, a coffee ~45, a
+  gym session ~90). It decides when a follow-up like "how was it?" becomes appropriate.
 """
 
 
@@ -225,6 +229,27 @@ def _clean_events(items: Any) -> list[dict[str, Any]]:
             "category": str(item.get("category") or "life-update").strip().lower(),
             "emotion": emotion if emotion in valid_emotion else None,
             "event_date": when if when in valid_when else None,
+            "at": _clean_clock_time(item.get("at")),
+            "duration_minutes": _clean_duration(item.get("duration_minutes")),
             "importance": _clamp(item.get("importance")),
         })
     return out[:6]
+
+
+def _clean_clock_time(value: Any) -> Optional[str]:
+    """Accept only a real 'HH:MM' 24-hour time. Model output is untrusted."""
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"\s*([01]?\d|2[0-3])\s*:\s*([0-5]\d)\s*", value)
+    if not match:
+        return None
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def _clean_duration(value: Any) -> int:
+    """Minutes an event plausibly lasts, clamped to something sane. Default: one hour."""
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return 60
+    return max(5, min(12 * 60, minutes))
