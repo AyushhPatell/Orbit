@@ -1565,6 +1565,62 @@ content matching cannot — the words either match or they don't.
 New `Tests/run-bargein-corpus.sh` in CI. Verified: **202 pytest**, six corpora, clean
 xcodebuild. **Xcode rebuild required**, then enable the toggle to try it.
 
+### Phase 3.28 — DONE (2026-08-03): memory that cannot bleed across days
+
+Ayush asked *"what do you know about today"* and got:
+
+> *"You worked your co-op shift earlier today from 8:30 to 4:30, planned a quick breakfast
+> this morning, and had reminders about calling Shreel which are now all done."*
+
+Only the Shreel part was true. The **shift** came from a ROUTINE fact — a pattern, told to
+ORBIT over a month ago. The **breakfast** was from **yesterday**.
+
+**The finding that mattered**, reproduced against the live DB rather than reasoned about:
+
+```
+[PAST (yesterday)]  Planning to have a quick breakfast with no specific menu yet
+                    shared yesterday, event_date=today
+```
+
+`_temporal_label` had **already** labelled it correctly, and the prompt **already** said not
+to speak of PAST things as current. **The label was right and the model ignored it.** This is
+the third time this session the same lesson has arrived — after the name resolution and the
+discretion guard — and it is now a standing rule: *labelling is not enforcement.*
+
+Fixes, all structural:
+
+1. **A previous day's event never reaches the prompt.** The **day boundary is the filter**;
+   the phase is only a label. Today's finished events *stay* — "you called Shreel earlier" is
+   true and worth having — so this costs no real context. Finished events still feed
+   follow-ups, where volunteering is already gated on an opener.
+2. **Routines are patterns, not records.** "Shift runs 8:30–4:30 on working days" describes
+   what he *usually* does; it is not evidence he did it today, and ORBIT has no way to know.
+   Stated explicitly wherever routines are injected. Now: *"I don't have today's attendance
+   info, but your usual co-op shift is 8:30 AM to 4:30 PM. Did you work your shift today?"*
+3. **Consolidation only expired events that had a clock time**, so a dated-but-timeless event
+   (`event_date="today"`, no hour) never aged out — which is exactly how a day-old breakfast
+   was still sitting in the live window. It now expires by day. Three stale Aug-2 rows
+   retired, and the extractor's misspelled duplicate ("Kawan, Manikash, Shel") merged away.
+
+Verified live, both failure modes:
+
+```
+"what do you know about today" → "…You called Shreel earlier about the get-together and
+                                  dinner… Other than that, no new specific events today yet."
+"did I work today"             → "I don't have today's attendance info, but your usual
+                                  co-op shift is 8:30 AM to 4:30 PM. Did you work today?"
+```
+
+**Barge-in — one definite bug fixed, root cause NOT yet proven.** The SpeechAnalyzer path
+(`useModernSpeech`, default ON) returns *before* the line that enables echo cancellation, so
+AEC was never applied on his machine at all. Fixed. But that alone does not explain "stop"
+being ignored entirely, and reading the code cannot separate *"the mic never opened"* from
+*"it opened and heard only ORBIT"*. Rather than guess — the mistake this project has paid for
+before — a trace now records whether barge-in armed, which engine, whether AEC is on, and
+every transcript with the reason it was accepted or rejected. Say **"barge-in diagnostics"**.
+
+Verified: **210 pytest**, six corpora, clean xcodebuild, CI green. **Xcode rebuild required.**
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias
