@@ -1,0 +1,16 @@
+{
+  "source": "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/OrbitListeningHUDController.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Voice only: say open 1, yes, or cancel",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 496
+        }
+      }
+    ]
+  },
+  "version": 1
+}

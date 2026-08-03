@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>66509B3F-62A4-48ED-86DC-8FF7DC08599D</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>66509B3F-62A4-48ED-86DC-8FF7DC08599D.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>5</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>ORBITMac project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>ORBITMac</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project ORBITMac with scheme ORBITMac</string>
+			<key>timeStartedRecording</key>
+			<real>799269032.28422296</real>
+			<key>timeStoppedRecording</key>
+			<real>799269037.26971197</real>
+			<key>title</key>
+			<string>Building project ORBITMac with scheme ORBITMac</string>
+			<key>uniqueIdentifier</key>
+			<string>66509B3F-62A4-48ED-86DC-8FF7DC08599D</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

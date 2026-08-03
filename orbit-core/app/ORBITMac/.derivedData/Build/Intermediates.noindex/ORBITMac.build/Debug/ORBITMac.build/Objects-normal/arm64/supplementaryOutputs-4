@@ -1,0 +1,23 @@
+{
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/ORBITMacApp.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ORBITMacApp.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ORBITMacApp.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ORBITMacApp.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ORBITMacApp.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ORBITMacApp.swiftdeps"
+  },
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/OrbitListeningHUDController.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningHUDController.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningHUDController.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningHUDController.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningHUDController.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningHUDController.swiftdeps"
+  },
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/OrbitListeningPresence.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningPresence.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningPresence.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningPresence.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningPresence.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitListeningPresence.swiftdeps"
+  }
+}

@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+.pycache/
+*.pyc
+*.pyo
+*.pyd
+
+.env
+orbit-core/.env
+orbit-core/.venv/
+orbit-core/data/
+*.egg-info/

@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ORBIT — Constellation Final</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  overflow: hidden; min-height: 100vh;
+}
+.bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+  background: rgba(0,0,0,0.88); backdrop-filter: blur(20px);
+  display: flex; align-items: center; gap: 7px; padding: 8px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.bl { font-size: 9px; color: rgba(255,255,255,0.32); letter-spacing:.14em; text-transform:uppercase; margin-right:2px; }
+.bb, .cb {
+  font-size: 10px; padding: 3px 11px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14); background: transparent;
+  color: rgba(255,255,255,0.42); cursor: pointer; transition: all .13s;
+}
+.bb:hover, .cb:hover { color: white; border-color: rgba(255,255,255,.36); }
+.bb.on { background: rgba(255,255,255,.11); color: white; border-color: rgba(255,255,255,.32); }
+.cb.on { background: rgba(120,205,255,.16); color: rgba(160,220,255,.9); border-color: rgba(120,205,255,.38); }
+.bsep { width:1px; height:14px; background:rgba(255,255,255,.08); margin:0 3px; }
+
+#scene {
+  position: fixed; inset: 0; transition: background .5s;
+}
+#scene.s-lake  { background: linear-gradient(180deg,#74b9e8 0%,#5aaad4 45%,#3d8fb5 100%); }
+#scene.s-dark  { background: #0d0d0f; }
+#scene.s-code  { background: #1e1e1e; }
+#scene.s-light { background: linear-gradient(180deg,#eaeaea,#d8d8d8); }
+
+#orb {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  width: 104px; height: 104px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 52%, #000508 0%, #010a14 50%, #000406 100%);
+  border: 1.5px solid rgba(120,205,255,.26);
+  box-shadow: 0 0 40px rgba(100,188,255,.22), 0 8px 32px rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 500;
+  transition: border-color .4s, box-shadow .4s;
+}
+#orb.active {
+  border-color: rgba(120,205,255,.7);
+  box-shadow: 0 0 90px rgba(100,188,255,.55), 0 8px 32px rgba(0,0,0,.6);
+}
+.orb-core {
+  width: 50px; height: 50px; border-radius: 50%; position: relative; z-index: 1;
+  background: radial-gradient(circle at 35% 45%, #000010 0%, #060840 35%, #1060c8 65%, rgba(60,148,238,.3) 85%, transparent 100%);
+}
+.orb-ring {
+  position: absolute; border-radius: 50%;
+  border: 1px solid rgba(120,205,255,.3);
+  animation: spin 5s linear infinite;
+}
+.r1 { width:80px; height:80px; top:12px; left:12px; }
+.r2 { width:92px; height:92px; top:6px; left:6px; animation-direction:reverse; animation-duration:7s; opacity:.4; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#svgl {
+  position: fixed; inset: 0; width:100%; height:100%;
+  pointer-events: none; z-index: 100; overflow: visible;
+}
+.thr {
+  stroke-dasharray: 5 5; stroke-width: 1; fill: none;
+  opacity: 0; transition: opacity .38s;
+  animation: df 3s linear infinite;
+}
+.thr.vis { opacity: 1; }
+@keyframes df { to { stroke-dashoffset: -20; } }
+
+/* ── Node wrapper ──
+   Position: fixed, left/top set to the CENTRE of the node card.
+   transform: translate(-50%, -50%) centres it on that point.
+   The dot is inside .nd-inner as absolute, top:-5px, left:50%
+   so it peeks out above the card exactly like the original.
+   NO overflow:hidden on .nd-inner or .nd-card.
+*/
+.nd {
+  position: fixed;
+  /* --ox/--oy = offset from final pos back to orb centre, set by JS */
+  transform: translate(calc(-50% + var(--ox,0px)), calc(-50% + var(--oy,0px))) scale(0.12);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.52s cubic-bezier(0.25,0.46,0.45,0.94),
+              transform 0.64s cubic-bezier(0.34,1.18,0.64,1);
+  z-index: 200; cursor: pointer;
+}
+.nd.vis {
+  opacity: 1;
+  transform: translate(-50%,-50%) scale(1);
+  pointer-events: auto;
+}
+.nd.hiding {
+  opacity: 0;
+  transform: translate(calc(-50% + var(--ox,0px)), calc(-50% + var(--oy,0px))) scale(0.1);
+  transition: opacity 0.32s cubic-bezier(0.4,0,0.8,0.6),
+              transform 0.38s cubic-bezier(0.4,0,0.6,1);
+  pointer-events: none;
+}
+
+/* ── The card — exactly styled like original const-node-inner ── */
+.nd-inner {
+  background: linear-gradient(145deg, rgba(8,14,30,0.97), rgba(4,9,20,0.98));
+  border: 1px solid rgba(120,205,255,0.28);
+  border-radius: 16px;
+  padding: 14px 14px 12px;
+  min-width: 140px; max-width: 168px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.65), 0 0 20px rgba(100,188,255,0.08);
+  position: relative;
+  transition: all 0.15s;
+  /* NO overflow:hidden — dot must be visible above */
+}
+.nd-inner::before {
+  content: '';
+  position: absolute; inset: -1px; border-radius: 17px;
+  background: linear-gradient(135deg,
+    rgba(120,205,255,0.3),
+    rgba(60,120,220,0.1),
+    rgba(120,205,255,0.2)
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  padding: 1px; opacity: 0; transition: opacity 0.15s;
+}
+.nd-inner:hover {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.75), 0 0 30px rgba(100,188,255,0.18);
+  border-color: rgba(120,205,255,0.5);
+}
+.nd-inner:hover::before { opacity: 1; }
+.nd.sel .nd-inner {
+  border-color: rgba(120,205,255,0.8);
+  box-shadow: 0 12px 44px rgba(0,0,0,0.85), 0 0 40px rgba(100,188,255,0.4);
+}
+
+/* ── THE DOT — exact copy from original const-node-dot ──
+   position: absolute
+   top: -5px  (half of 9px height — so half peeks above card)
+   left: 50%
+   transform: translateX(-50%)
+   The animation moves only scale and box-shadow,
+   translateX(-50%) stays constant so it never shifts.
+*/
+.nd-dot {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 9px; height: 9px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(200,238,255,0.95), rgba(80,160,255,0.8));
+  box-shadow: 0 0 10px rgba(120,205,255,0.9), 0 0 20px rgba(80,160,255,0.4);
+  animation: node-pulse 2s ease-in-out infinite;
+}
+@keyframes node-pulse {
+  0%,100% {
+    box-shadow: 0 0 8px rgba(120,205,255,0.8), 0 0 16px rgba(80,160,255,0.3);
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(120,205,255,1), 0 0 28px rgba(80,160,255,0.5);
+    transform: translateX(-50%) scale(1.2);
+  }
+}
+
+.nd-num {
+  font-size: 9px; font-weight: 800; color: rgba(120,205,255,0.75);
+  letter-spacing: 0.1em; margin-bottom: 5px; font-variant-numeric: tabular-nums;
+}
+.nd-name {
+  font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.92);
+  margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nd-path {
+  font-size: 9px; color: rgba(255,255,255,0.3);
+  font-family: 'SF Mono', monospace; line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Max banner ── */
+#maxbanner {
+  position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: rgba(255,255,255,.45);
+  background: rgba(0,0,0,.48); backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.08); border-radius: 999px;
+  padding: 5px 16px; opacity: 0; pointer-events: none;
+  transition: opacity .4s .6s; z-index: 600; white-space: nowrap;
+}
+#maxbanner.vis { opacity: 1; }
+
+/* ── Hint ── */
+#hint {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: center;
+  background: rgba(0,0,0,.58); backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,.07); border-radius: 999px;
+  padding: 6px 16px; opacity: 0; pointer-events: none;
+  transition: opacity .4s .55s; z-index: 600; max-width: 92vw;
+}
+#hint.vis { opacity: 1; }
+.ht {
+  font-size: 9.5px; font-weight: 600; font-family: 'SF Mono',monospace;
+  padding: 3px 8px; border-radius: 5px;
+  background: rgba(120,205,255,.12); border: 1px solid rgba(120,205,255,.22);
+  color: rgba(120,205,255,.88);
+}
+.ht .k { color: rgba(255,255,255,.5); font-weight: 400; }
+.hsep { width:1px; height:11px; background:rgba(255,255,255,.09); }
+.hmore { font-size: 9px; color: rgba(255,255,255,.32); }
+#ohint {
+  position: fixed; top: 162px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; color: rgba(255,255,255,.26); letter-spacing:.08em;
+  pointer-events: none; z-index: 600; white-space: nowrap; transition: opacity .3s;
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bl">BG</div>
+  <button class="bb" onclick="setBg('s-dark')">Dark</button>
+  <button class="bb on" onclick="setBg('s-lake')">Lake Tahoe</button>
+  <button class="bb" onclick="setBg('s-code')">VS Code</button>
+  <button class="bb" onclick="setBg('s-light')">Light</button>
+  <div class="bsep"></div>
+  <div class="bl">Items</div>
+  <button class="cb on" onclick="setN(3,this)">3</button>
+  <button class="cb" onclick="setN(5,this)">5</button>
+  <button class="cb" onclick="setN(8,this)">8</button>
+  <button class="cb" onclick="setN(12,this)">12</button>
+  <button class="cb" onclick="setN(15,this)">15</button>
+  <button class="cb" onclick="setN(18,this)">18→15</button>
+</div>
+
+<div id="scene" class="s-lake"></div>
+<div id="orb" onclick="toggle()">
+  <div class="orb-ring r1"></div>
+  <div class="orb-ring r2"></div>
+  <div class="orb-core"></div>
+</div>
+<svg id="svgl"></svg>
+<div id="maxbanner"></div>
+<div id="hint"></div>
+<div id="ohint">click orb to open</div>
+
+<script>
+const DATA = [
+  { name:'white.heic',             path:'/System/Library/PrivateFrameworks/AvatarKit…' },
+  { name:'close-white.svg',        path:'/Library/Application Support/Adobe/Acrobat/…' },
+  { name:'WhiteChapter_Draft.pdf', path:'~/Documents/Writing/Chapters/' },
+  { name:'WhiteBackground.png',    path:'~/Desktop/Assets/Backgrounds/' },
+  { name:'chapter-white.md',       path:'~/Documents/Notes/Projects/' },
+  { name:'white_noise.wav',        path:'~/Music/Samples/Ambient/' },
+  { name:'WhitePaper_2026.pdf',    path:'~/Documents/Research/' },
+  { name:'white-logo.svg',         path:'~/Projects/ORBIT/Assets/' },
+  { name:'snow_white.jpg',         path:'~/Pictures/2024/Winter/' },
+  { name:'white_rabbit_notes.txt', path:'~/Documents/Ideas/' },
+  { name:'whiteboard_sketch.png',  path:'~/Desktop/Sketches/' },
+  { name:'white_theme.json',       path:'~/Projects/VSCode/themes/' },
+  { name:'WhiteRose_Notes.txt',    path:'~/Documents/Journal/' },
+  { name:'whitespace_guide.md',    path:'~/Documents/Style/' },
+  { name:'white_2026_report.pdf',  path:'~/Documents/Annual/' },
+  { name:'white_balance_raw.cr2',  path:'~/Pictures/RAW/' },
+  { name:'WhiteSand_texture.png',  path:'~/Assets/Textures/' },
+  { name:'whitelist_domains.txt',  path:'~/Projects/Security/' },
+];
+
+const MAX_DISPLAY = 15;
+// Card dimensions — must match CSS
+const CARD_W = 168;
+const CARD_H = 86; // approximate rendered height
+
+let isOpen = false, n = 3, bg = 's-lake';
+let nEls = [], tEls = [];
+
+function orbInfo() {
+  const r = document.getElementById('orb').getBoundingClientRect();
+  return { cx: r.left + r.width/2, cy: r.top + r.height/2, r: r.width/2 };
+}
+
+function thrCol() {
+  return (bg === 's-dark' || bg === 's-code')
+    ? 'rgba(120,205,255,0.2)'   // original const-thread colour on dark
+    : 'rgba(20,55,140,0.35)';   // dark on light backgrounds
+}
+
+/* ── Layout with collision separation ── */
+function layout(count, ocx, ocy, orbR) {
+  const W = window.innerWidth, H = window.innerHeight;
+  const PAD_X = 90, PAD_Y = 20;
+  const MIN_Y = ocy + orbR + 24;
+  const MAX_Y = H - CARD_H - PAD_Y;
+  const GAP   = 14; // minimum gap between cards
+
+  // Two radius bands — create real vertical stagger
+  const rInner = Math.min(W * 0.21, 195);
+  const rOuter = Math.min(W * 0.37, 335);
+
+  // Angular fan centred on 90° (straight down)
+  const halfFan = count <= 3  ? 46
+                : count <= 5  ? 60
+                : count <= 8  ? 72
+                : count <= 12 ? 80 : 86;
+
+  const aStart = 90 - halfFan;
+  const aEnd   = 90 + halfFan;
+
+  // Initial placement: centre of each card
+  const pts = [];
+  for (let i = 0; i < count; i++) {
+    const t   = count === 1 ? 0.5 : i / (count - 1);
+    const deg = aStart + t * (aEnd - aStart);
+    const rad = deg * Math.PI / 180;
+    const jit = ((i * 19 + 7) % 11 - 5) * 10;
+    const r   = (i % 2 === 0) ? rInner + jit : rOuter + jit;
+    pts.push({
+      x: Math.max(PAD_X + CARD_W/2, Math.min(W - PAD_X - CARD_W/2, ocx + Math.cos(rad) * r)),
+      y: Math.max(MIN_Y + CARD_H/2, Math.min(MAX_Y, ocy + Math.sin(rad) * r))
+    });
+  }
+
+  // Force-directed separation — push overlapping cards apart
+  const HW = CARD_W/2, HH = CARD_H/2;
+  for (let iter = 0; iter < 120; iter++) {
+    let moved = false;
+    for (let a = 0; a < pts.length; a++) {
+      for (let b = a + 1; b < pts.length; b++) {
+        const pa = pts[a], pb = pts[b];
+        const ox = (CARD_W + GAP) - Math.abs(pa.x - pb.x);
+        const oy = (CARD_H + GAP) - Math.abs(pa.y - pb.y);
+        if (ox > 0 && oy > 0) {
+          // Push along axis with smaller overlap
+          if (ox < oy) {
+            const push = ox / 2 + 1;
+            const dir  = pa.x >= pb.x ? 1 : -1;
+            pa.x += dir * push; pb.x -= dir * push;
+          } else {
+            const push = oy / 2 + 1;
+            const dir  = pa.y >= pb.y ? 1 : -1;
+            pa.y += dir * push; pb.y -= dir * push;
+          }
+          moved = true;
+        }
+      }
+    }
+    // Clamp after each pass
+    pts.forEach(p => {
+      p.x = Math.max(PAD_X + HW, Math.min(W - PAD_X - HW, p.x));
+      p.y = Math.max(MIN_Y + HH, Math.min(MAX_Y, p.y));
+    });
+    if (!moved) break;
+  }
+  return pts;
+}
+
+/* ── Build ── */
+function build() {
+  clear();
+  const displayCount = Math.min(n, MAX_DISPLAY);
+  const items = DATA.slice(0, displayCount);
+  const o     = orbInfo();
+  const pos   = layout(displayCount, o.cx, o.cy, o.r);
+  const svg   = document.getElementById('svgl');
+  const col   = thrCol();
+
+  items.forEach((item, i) => {
+    const p     = pos[i];
+    const delay = (0.04 + i * 0.055).toFixed(3);
+
+    // Thread from orb centre to card centre
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', o.cx); line.setAttribute('y1', o.cy);
+    line.setAttribute('x2', p.x);  line.setAttribute('y2', p.y);
+    line.setAttribute('class','thr');
+    line.style.stroke = col;
+    line.style.transitionDelay = delay + 's';
+    svg.appendChild(line);
+    tEls.push(line);
+
+    // Node: translate(-50%,-50%) centres it on p.x, p.y
+    const el = document.createElement('div');
+    el.className = 'nd';
+    el.style.left = p.x + 'px';
+    el.style.top  = p.y + 'px';
+    el.style.transitionDelay = delay + 's';
+    // Launch offset: vector from node position back to orb centre
+    const ox = o.cx - p.x;
+    const oy = o.cy - p.y;
+    el.style.setProperty('--ox', ox + 'px');
+    el.style.setProperty('--oy', oy + 'px');
+    el.onclick = () => sel(i);
+
+    const dotDelay = ((i * 0.31) % 2).toFixed(2);
+
+    // Dot is inside nd-inner, position:absolute, top:-5px, left:50%
+    // exactly matching the original const-node-dot
+    el.innerHTML = `
+      <div class="nd-inner">
+        <div class="nd-dot" style="animation-delay:${dotDelay}s"></div>
+        <div class="nd-num">NODE ${String(i+1).padStart(2,'0')}</div>
+        <div class="nd-name">${item.name}</div>
+        <div class="nd-path">${item.path}</div>
+      </div>`;
+    document.body.appendChild(el);
+    nEls.push(el);
+  });
+
+  // Banner for truncated results
+  const banner = document.getElementById('maxbanner');
+  if (n > MAX_DISPLAY) {
+    banner.textContent = `Found ${n} results — showing top ${MAX_DISPLAY}. Say "open 1"–"open ${MAX_DISPLAY}" or "cancel".`;
+    banner.classList.add('vis');
+  } else {
+    banner.classList.remove('vis');
+  }
+
+  buildHint(displayCount);
+}
+
+function show() {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.getElementById('orb').classList.add('active');
+    document.getElementById('hint').classList.add('vis');
+    document.getElementById('ohint').style.opacity = '0';
+    nEls.forEach(e => e.classList.add('vis'));
+    tEls.forEach(e => e.classList.add('vis'));
+  }));
+}
+
+function hide() {
+  document.getElementById('orb').classList.remove('active');
+  document.getElementById('hint').classList.remove('vis');
+  document.getElementById('maxbanner').classList.remove('vis');
+  document.getElementById('ohint').style.opacity = '1';
+  // Add .hiding so nodes animate back toward orb centre
+  nEls.forEach(e => {
+    e.classList.remove('vis');
+    e.classList.add('hiding');
+  });
+  tEls.forEach(e => e.classList.remove('vis'));
+  setTimeout(() => { if (!isOpen) clear(); }, 450);
+}
+
+function clear() {
+  nEls.forEach(e => e.remove());
+  tEls.forEach(e => e.remove());
+  nEls = []; tEls = [];
+  document.getElementById('svgl').innerHTML = '';
+}
+
+function sel(idx) {
+  nEls.forEach((e,i) => e.classList.toggle('sel', i === idx));
+}
+
+function toggle() {
+  if (!isOpen) { isOpen = true;  build(); show(); }
+  else         { isOpen = false; hide(); }
+}
+
+function buildHint(count) {
+  const strip = document.getElementById('hint');
+  strip.innerHTML = '';
+  const show = Math.min(3, count);
+  for (let i = 1; i <= show; i++) {
+    if (i > 1) { const s=document.createElement('div'); s.className='hsep'; strip.appendChild(s); }
+    const t=document.createElement('div'); t.className='ht';
+    t.innerHTML=`<span class="k">say</span> "open ${i}"`;
+    strip.appendChild(t);
+  }
+  const s=document.createElement('div'); s.className='hsep'; strip.appendChild(s);
+  if (count > 3) {
+    const m=document.createElement('div'); m.className='hmore';
+    m.textContent=`… "open ${count}" · "cancel"`;
+    strip.appendChild(m);
+  } else {
+    const t=document.createElement('div'); t.className='ht';
+    t.innerHTML=`<span class="k">say</span> "cancel"`;
+    strip.appendChild(t);
+  }
+}
+
+function setN(num, el) {
+  n = num;
+  document.querySelectorAll('.cb').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  if (isOpen) { isOpen=false; hide(); setTimeout(()=>{ isOpen=true; build(); show(); }, 680); }
+}
+
+function setBg(cls) {
+  bg = cls;
+  document.getElementById('scene').className = cls;
+  document.querySelectorAll('.bb').forEach(b=>
+    b.classList.toggle('on', b.getAttribute('onclick').includes(cls)));
+  if (isOpen) { isOpen=false; hide(); setTimeout(()=>{ isOpen=true; build(); show(); }, 680); }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const bh = document.querySelector('.bar').getBoundingClientRect().height;
+  document.getElementById('orb').style.top = (bh + 8) + 'px';
+  document.getElementById('ohint').style.top = (bh + 8 + 114) + 'px';
+});
+
+window.addEventListener('resize', () => {
+  if (isOpen) { isOpen=false; hide(); setTimeout(()=>{ isOpen=true; build(); show(); }, 680); }
+});
+</script>
+</body>
+</html>

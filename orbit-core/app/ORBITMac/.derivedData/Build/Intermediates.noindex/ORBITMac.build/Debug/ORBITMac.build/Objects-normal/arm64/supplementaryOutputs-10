@@ -1,0 +1,23 @@
+{
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps"
+  },
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/ShortcutsService.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ShortcutsService.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ShortcutsService.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ShortcutsService.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ShortcutsService.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/ShortcutsService.swiftdeps"
+  },
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/WebActionService.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/WebActionService.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/WebActionService.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/WebActionService.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/WebActionService.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/WebActionService.swiftdeps"
+  }
+}

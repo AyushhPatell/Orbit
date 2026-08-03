@@ -1,0 +1,23 @@
+{
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/OrbitVoiceKit.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoiceKit.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoiceKit.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoiceKit.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoiceKit.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoiceKit.swiftdeps"
+  },
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/OrbitVoicePartingLine.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoicePartingLine.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoicePartingLine.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoicePartingLine.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoicePartingLine.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitVoicePartingLine.swiftdeps"
+  },
+  "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/ORBITMac/OrbitWakeVoiceBackstage.swift" : {
+    "const-values" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitWakeVoiceBackstage.swiftconstvalues",
+    "dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitWakeVoiceBackstage.d",
+    "diagnostics" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitWakeVoiceBackstage.dia",
+    "object" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitWakeVoiceBackstage.o",
+    "swift-dependencies" : "/Users/ayush/Documents/PJ/ORBIT/orbit-core/app/ORBITMac/.derivedData/Build/Intermediates.noindex/ORBITMac.build/Debug/ORBITMac.build/Objects-normal/arm64/OrbitWakeVoiceBackstage.swiftdeps"
+  }
+}
