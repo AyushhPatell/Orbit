@@ -156,7 +156,10 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
     func stopListening(commitIfPossible: Bool = false) {
         if commitIfPossible, !didCommit {
             let text = latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
+            // Filler-only means he was thinking, not talking — nothing worth sending ever
+            // arrived, so end the session the same way pure silence does. (The 3 PM
+            // briefing case: a committed "Um" became a memory recital.)
+            if !text.isEmpty, !OrbitUtteranceCleanup.isFillerOnly(text) {
                 didCommit = true
                 onCommit?(text)
             }
@@ -260,6 +263,13 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return base
+        }
+        // Nothing but "um"/"uh" so far: he is thinking. Short transcripts used to get the
+        // SHORTEST pause, so a thinking sound was committed fastest of all — give the
+        // thought room instead. If real words follow, the normal pauses take over below;
+        // if nothing follows, the session ends silently (see stopListening).
+        if OrbitUtteranceCleanup.isFillerOnly(trimmed) {
+            return 6.0
         }
         let words = trimmed.split(whereSeparator: \.isWhitespace).count
         let lastWord = trimmed

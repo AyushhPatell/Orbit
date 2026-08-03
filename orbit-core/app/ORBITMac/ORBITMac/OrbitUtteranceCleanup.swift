@@ -69,6 +69,24 @@ enum OrbitUtteranceCleanup {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// True when an utterance is nothing but disfluencies — "Um", "uh, umm…": a person
+    /// *thinking*, not speaking.
+    ///
+    /// Committing one of these as a message is how a bare "Um" became a full memory recital
+    /// (the 3 PM briefing case, 2026-08-03): the pause after it was the shortest of all, the
+    /// only send-guard was non-empty, and the backend answered the only content it received.
+    /// Filler-only utterances must never leave the Mac.
+    static func isFillerOnly(_ text: String) -> Bool {
+        let fillers: Set<String> = [
+            "um", "umm", "ummm", "uhm", "uh", "uhh", "uhhh", "er", "erm",
+            "hmm", "hm", "hmmm", "mmm", "mm", "eh", "ah", "aah", "huh",
+        ]
+        let tokens = text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        return !tokens.isEmpty && tokens.allSatisfy { fillers.contains($0) }
+    }
+
     /// True when a supposedly-extracted title still reads like the request that produced it.
     ///
     /// This is the honest version of "did extraction actually work?". A real title is the *task*

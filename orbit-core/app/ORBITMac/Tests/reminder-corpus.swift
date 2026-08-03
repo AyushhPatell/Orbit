@@ -119,6 +119,17 @@ enum ReminderCorpus {
             check("event needs time \"\(t)\"", OrbitUtteranceCleanup.hasExplicitClockTime(t), false)
         }
 
+        // ── Filler-only utterances (the 3 PM briefing case, 2026-08-03): a bare "Um"
+        //    was committed fastest of all and sent to the brain, which recited memory
+        //    back. Thinking sounds must never leave the Mac.
+        for t in ["Um", "um", "Umm.", "uh", "uh, um", "hmm", "er…", "Uh, umm, er"] {
+            check("filler-only \"\(t)\"", OrbitUtteranceCleanup.isFillerOnly(t), true)
+        }
+        for t in ["um okay", "yes", "no", "umm remind me to call mum", "open safari",
+                  "I am going for a bath now", "sleep", ""] {
+            check("has content \"\(t)\"", OrbitUtteranceCleanup.isFillerOnly(t), false)
+        }
+
         print(fails == 0 ? "✅ all reminder-parsing checks passed" : "❌ \(fails) failure(s)")
         exit(fails == 0 ? 0 : 1)
 

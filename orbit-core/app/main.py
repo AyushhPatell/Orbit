@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import re
 import time
@@ -221,8 +222,10 @@ def _get_nudge_candidates(life_events: list, current_hour: int) -> list[str]:
     candidates = []
     for ev in life_events:
         temporal = _temporal_label(ev, current_hour)
-        # Only nudge about PAST events (not upcoming ones)
-        if "PAST" not in temporal and "JUST FINISHED" not in temporal:
+        # Follow-ups belong to things that have HAPPENED: past events, or a morning plan
+        # that by evening is likely done ("how was breakfast?" at night — never a recital
+        # of it as current at 3 PM).
+        if not any(k in temporal for k in ("PAST", "JUST FINISHED", "LIKELY DONE")):
             continue
         summary = ev.get("summary", "")
         topic_key = summary[:40].lower().strip()
@@ -307,54 +310,193 @@ def _current_hour(client_local_iso: Optional[str]) -> int:
     return datetime.now().hour
 
 
-def _temporal_label(event: dict, current_hour: int) -> str:
-    """Label a life event as UPCOMING, HAPPENING NOW, PAST, or RECENT based on current time."""
-    event_date = event.get("event_date") or ""
-    created = event.get("created_at", "")
-
-    # Check if the event was shared today or on a previous day
-    from datetime import datetime, timedelta
+def _event_age_hours(created: str, *, now=None) -> Optional[float]:
+    """Hours since a DB timestamp. SQLite CURRENT_TIMESTAMP is UTC, so 'now' is UTC too —
+    the old code compared UTC storage against local time, silently understating every age
+    by the UTC offset (3h in Halifax)."""
+    from datetime import datetime
     try:
         created_dt = datetime.strptime(created, "%Y-%m-%d %H:%M:%S")
-        now = datetime.now()
-        days_ago = (now.date() - created_dt.date()).days
     except Exception:
-        days_ago = 0
+        return None
+    current = now or datetime.utcnow()
+    return max(0.0, (current - created_dt).total_seconds() / 3600.0)
 
-    if days_ago >= 1:
-        # Event shared yesterday or earlier
-        if event_date in ("today", "today-evening", "tonight"):
-            return "PAST (was for yesterday)"
-        if event_date == "tomorrow" and days_ago == 1:
-            return "TODAY (was tomorrow when shared yesterday)"
-        if days_ago >= 2:
-            return f"PAST ({days_ago} days ago)"
-        return "PAST (yesterday)"
 
-    # Event shared today — check time relevance
-    if event_date == "today-evening" or event_date == "tonight":
-        if current_hour < 17:
-            return "UPCOMING TONIGHT"
-        elif current_hour < 21:
-            return "HAPPENING SOON / NOW"
+def _age_phrase(created: str, *, now=None) -> str:
+    """'2 hours ago' / 'yesterday' — models reason about ages far better than raw timestamps."""
+    hours = _event_age_hours(created, now=now)
+    if hours is None:
+        return "recently"
+    if hours < 1:
+        return "just now"
+    if hours < 24:
+        n = max(1, int(hours))
+        return f"{n} hour{'s' if n != 1 else ''} ago"
+    days = int(hours // 24)
+    return "yesterday" if days == 1 else f"{days} days ago"
+
+
+def _temporal_label(event: dict, current_hour: int, *, now=None) -> str:
+    """Label a life event relative to the clock that matters: the one ticking NOW.
+
+    The old version had two field-verified lies in it (2026-08-02/03):
+    - "weekend"/"next-week" events fell through to PAST after a single day, so future
+      plans were briefed as history;
+    - "today" stayed current until midnight, so a 10 AM breakfast plan was still
+      "planning now" at 6 PM (the 3 PM briefing case).
+    Every spoken date word is resolved against the day it was SAID, then compared to today.
+    All datetimes are UTC-naive to match SQLite CURRENT_TIMESTAMP; `current_hour` stays the
+    client's local hour and only shapes the tonight/evening phrasing.
+    """
+    from datetime import datetime, timedelta
+
+    event_date = event.get("event_date") or ""
+    created = event.get("created_at", "")
+    current = now or datetime.utcnow()
+    try:
+        created_dt = datetime.strptime(created, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        created_dt = current
+    age = _age_phrase(created, now=current)
+    today = current.date()
+
+    # Resolve the spoken date word against the day it was said, producing a window.
+    start = end = None
+    if event_date in ("today", "tonight", "today-evening"):
+        start = end = created_dt.date()
+    elif event_date == "tomorrow":
+        start = end = created_dt.date() + timedelta(days=1)
+    elif event_date == "weekend":
+        # "This weekend" said on a Sunday means the one underway, not next Saturday.
+        if created_dt.weekday() == 6:
+            start = created_dt.date() - timedelta(days=1)
         else:
-            return "HAPPENING NOW OR JUST FINISHED"
-    if event_date == "today":
-        return "TODAY"
-    if event_date == "tomorrow":
-        return "UPCOMING TOMORROW"
-    if event_date == "weekend":
-        return "UPCOMING THIS WEEKEND"
-    if event_date == "next-week":
-        return "UPCOMING NEXT WEEK"
+            start = created_dt.date() + timedelta(days=5 - created_dt.weekday())
+        end = start + timedelta(days=1)
+    elif event_date == "next-week":
+        start = created_dt.date() + timedelta(days=7 - created_dt.weekday())
+        end = start + timedelta(days=6)
 
-    # No specific date — use category
+    if start is not None:
+        if today > end:
+            gone = (today - end).days
+            return "PAST (yesterday)" if gone == 1 else f"PAST ({gone} days ago)"
+        if today < start:
+            ahead = (start - today).days
+            when = "TOMORROW" if ahead == 1 else f"in {ahead} days"
+            return f"UPCOMING {when} (shared {age})"
+        # The window is now.
+        if event_date in ("tonight", "today-evening"):
+            if current_hour < 17:
+                return "UPCOMING TONIGHT"
+            if current_hour < 21:
+                return "HAPPENING SOON / NOW"
+            return "HAPPENING NOW OR JUST FINISHED"
+        if event_date == "today":
+            hours_old = _event_age_hours(created, now=current) or 0.0
+            if hours_old >= 3:
+                return f"EARLIER TODAY — LIKELY DONE by now (shared {age})"
+            return f"TODAY (shared {age})"
+        if event_date == "tomorrow":
+            return "TODAY (was 'tomorrow' when he said it)"
+        if event_date == "weekend":
+            return "THIS WEEKEND (now)"
+        return "THIS WEEK (was 'next week' when he said it)"
+
+    # No resolvable date — age decides how alive it still is.
+    days_old = (today - created_dt.date()).days
+    if days_old >= 2:
+        return f"PAST ({days_old} days ago)"
+    if days_old == 1:
+        return "PAST (yesterday)"
     cat = event.get("category", "general")
     if cat == "feeling":
-        return "CURRENT FEELING"
+        return f"CURRENT FEELING (shared {age})"
     if cat == "plan":
-        return "SHARED PLAN"
-    return "RECENT"
+        return f"SHARED PLAN (shared {age})"
+    return f"RECENT (shared {age})"
+
+
+def _is_conversational_opener(text: str) -> bool:
+    """True when the message is a greeting / check-in / "what's up" — the ONLY turns where
+    ORBIT may volunteer remembered plans. A substantive message means: answer it, volunteer
+    nothing. (The 3 PM briefing case: "okay?" must never trigger a briefing.)"""
+    t = re.sub(r"[^a-z' ]+", " ", text.lower())
+    t = re.sub(r"\borbit\b", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t:
+        return True  # a bare summons ("ORBIT?") opens the floor
+    words = t.split()
+    greetings = {
+        "hi", "hey", "hello", "yo", "hiya", "morning", "afternoon", "evening",
+        "good morning", "good afternoon", "good evening", "good day",
+        "hi there", "hey there", "hello there",
+    }
+    if t in greetings:
+        return True
+    if len(words) <= 7:
+        checkins = (
+            "how are you", "how's it going", "how is it going", "hows it going",
+            "how are things", "how's everything", "hows everything", "what's up",
+            "whats up", "sup", "how have you been", "how's your day", "hows your day",
+            "you there", "are you there", "you awake", "are you awake", "how you doing",
+        )
+        if any(t.startswith(c) for c in checkins):
+            return True
+    if len(words) <= 9:
+        briefings = (
+            "what's my day", "whats my day", "what's happening today", "whats happening today",
+            "what's new", "whats new", "anything new", "anything today", "anything for today",
+            "catch me up", "brief me", "what did i miss", "what's going on", "whats going on",
+            "what's on today", "whats on today", "what do i have today",
+        )
+        if any(b in t for b in briefings):
+            return True
+    return False
+
+
+def _normalized_for_similarity(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", text.lower())).strip()
+
+
+def _is_near_duplicate_reply(candidate: str, recent: list) -> bool:
+    """Structural repetition guard: a reply that near-repeats a recent one is robotic no
+    matter what the prompt says — prompting is not variety. Short replies are exempt
+    ("All set." twice is honest)."""
+    cand = _normalized_for_similarity(candidate)
+    if len(cand) < 60:
+        return False
+    assistant_turns = [m.content for m in recent if m.role == "assistant"][-3:]
+    for prev_text in assistant_turns:
+        prev = _normalized_for_similarity(prev_text)
+        if len(prev) < 60:
+            continue
+        if difflib.SequenceMatcher(None, cand, prev).ratio() >= 0.85:
+            return True
+    return False
+
+
+_GREETING_PREFIX = re.compile(
+    r"^\s*(?:good\s+)?(?:morning|afternoon|evening|night)(?:\s*,?\s*ayush)?\s*[,.!—–-]+\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_repeated_greeting(reply: str, recent: list) -> str:
+    """Greet once per conversation stretch: if the previous assistant turn already opened
+    with a time-of-day greeting, a fresh one is stripped. ("Afternoon, Ayush." on two
+    consecutive replies was part of the 3 PM briefing case.)"""
+    m = _GREETING_PREFIX.match(reply)
+    if not m:
+        return reply
+    last_assistant = next((t.content for t in reversed(recent) if t.role == "assistant"), None)
+    if not last_assistant or not _GREETING_PREFIX.match(last_assistant):
+        return reply
+    rest = reply[m.end():].strip()
+    if len(rest) < 2:
+        return reply
+    return rest[0].upper() + rest[1:]
 
 
 def load_profile(path: Path) -> str:
@@ -543,7 +685,7 @@ def build_messages(
             line = f"- [{temporal}] {ev['summary']}"
             if ev.get("emotion"):
                 line += f" (mood: {ev['emotion']})"
-            line += f" (shared: {ev['created_at']})"
+            line += f" (shared {_age_phrase(ev['created_at'])})"
             profile += line + "\n"
         profile += (
             "\n**How to use these memories:**\n"
@@ -558,6 +700,10 @@ def build_messages(
             "Assume you know what Ayush told you — don't re-ask.\n"
             "- When Ayush answers your question with a short reply ('nope', 'no', 'not really'), "
             "that is an ANSWER, not a conversation end. Acknowledge naturally and let him lead.\n"
+            "- These are CONTEXT, not content: never recite, list, or summarize them back to him "
+            "unless he explicitly asks what's going on or what you remember.\n"
+            "- Anything labeled LIKELY DONE or PAST has probably already happened — never speak "
+            "of it as current or still planned.\n"
         )
 
     # Emotional state: inject mood trend so ORBIT adjusts its tone
@@ -609,8 +755,11 @@ def build_messages(
 
     # Proactive nudging: suggest past events the LLM could naturally follow up on.
     # Only injected when there's something worth mentioning AND ORBIT hasn't asked about it recently.
+    # Volunteering is gated structurally, not by prompt rules: nudges are offered to the
+    # model ONLY when the user's message is a greeting/check-in. A substantive message
+    # means answer it — the model never even sees something to recite.
     nudge_candidates = _get_nudge_candidates(life_events, current_hour)
-    if nudge_candidates:
+    if nudge_candidates and _is_conversational_opener(user_message):
         profile += "\n\n### Proactive care (optional — use ONLY if it fits naturally)\n"
         profile += (
             "These are past events you could gently follow up on IF the conversation naturally opens up. "
@@ -670,20 +819,11 @@ def build_messages(
             + "\n\n### Adaptive style from recent user behavior\n"
             + adaptive_style
         )
-    # Approach B: prepend today's context directly into the user message so the LLM
-    # can't miss it. This makes life events impossible to ignore in casual replies.
-    augmented_message = user_message
-    if life_events:
-        today_context_parts = []
-        for ev in life_events:
-            temporal = _temporal_label(ev, current_hour)
-            if "PAST" not in temporal:
-                today_context_parts.append(f"{temporal}: {ev['summary']}")
-        if today_context_parts:
-            context_block = " | ".join(today_context_parts)
-            augmented_message = f"[Ayush's current context: {context_block}]\n{user_message}"
-
-    return [Message(role="system", content=profile), *recent, Message(role="user", content=augmented_message)]
+    # "Approach B" used to prepend life events INTO the user message so the model
+    # "couldn't miss them" — and on 2026-08-02 a bare "Um" (turn 1349) got a full memory
+    # recital back, twice, because the injected block WAS the message. The events live in
+    # the system prompt with ages and usage rules; the user's words go through untouched.
+    return [Message(role="system", content=profile), *recent, Message(role="user", content=user_message)]
 
 
 def is_memory_recall_question(text: str) -> bool:
@@ -1273,6 +1413,32 @@ async def chat(payload: ChatRequest) -> ChatResponse:
                     ToolCallInfo(tool=tc["tool"], params=tc["params"], id=tc["id"])
                     for tc in tool_call_dicts
                 ]
+                # Structural repetition guard: if the draft near-repeats a recent reply,
+                # regenerate once with the draft in view. He heard it the first time.
+                if not pending_tool_calls and _is_near_duplicate_reply(reply, recent_turns):
+                    try:
+                        fresh, _ = await chat_with_brain(
+                            [
+                                *messages,
+                                Message(role="assistant", content=reply),
+                                Message(
+                                    role="system",
+                                    content=(
+                                        "That draft repeats what you already told him moments "
+                                        "ago. Reply freshly to his LAST message only — short "
+                                        "and natural, no recap of plans, reminders, or schedule."
+                                    ),
+                                ),
+                            ],
+                            api_key=s.brain_api_key,
+                            base_url=s.brain_base_url,
+                            model=s.brain_model,
+                            max_tokens=s.chat_max_tokens_cloud,
+                        )
+                        if fresh.strip():
+                            reply = fresh
+                    except (httpx.RequestError, RuntimeError):
+                        pass  # never fail the turn over dedup; the original reply stands
             except httpx.RequestError:
                 # Offline resilience: the brain is a cloud call. Without internet ORBIT must
                 # not go dead — a companion that needs wi-fi to say hello is not a companion.
@@ -1431,6 +1597,9 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             reply = normalize_casual_checkin_reply(reply)
         reply = shorten_reply_when_overlong(reply, user_message=payload.message)
     reply = strip_repetitive_reassurance(reply)
+    # Greet once per conversation stretch — "Afternoon, Ayush." on two consecutive
+    # replies was part of the 3 PM briefing case.
+    reply = _strip_repeated_greeting(reply, recent_turns)
     reply = ground_calendar_reply(
         reply,
         user_message=payload.message,

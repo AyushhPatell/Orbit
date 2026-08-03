@@ -506,10 +506,10 @@ Rules:
 
 Full detail in `docs/ORBIT_EVOLUTION.md` (the complete evolution map, written after the 3 PM briefing case).
 
-1. **URGENT — rotate the OpenAI key.** `orbit-core/.env.backup-2026-08-01` (contains `CLOUD_API_KEY`) was pushed to GitHub. Rotate at platform.openai.com, then `git rm` the backup and harden `.gitignore` (`.env*`, `.run/`, `.derivedData/`). `data/` (orbit.db, audit log) did NOT leak — verified.
-2. **The 3 PM briefing case — root cause found, fix package proposed, awaiting approval.** Four verified layers: (a) bare "Um" committed because short transcripts get the *shortest* endpoint pause (`OrbitSpeechInputController.swift:258`) and the only send-guard is non-empty; (b) "Approach B" (`main.py:673-684`) prepends all non-PAST life events INTO the user message, so "Um" became a context recital request — reconstructed byte-for-byte from turns 1349-1352; (c) `_temporal_label` has no intra-day staleness, so a 10 AM breakfast plan reads "current" at 6 PM; (d) Approach B has no novelty tracking (unlike nudges), so "okay?" got the identical recital again. Fix: filler-only commits never sent; Approach B replaced by a proactivity governor (novelty + relevance + budget); ages not labels; structural repetition guard; greet once per session.
+1. ~~**URGENT — rotate the OpenAI key.**~~ — **DONE 2026-08-03.** Ayush rotated the key (GitHub's scanner flagged it on push); repo cleaned: `.env.backup` untracked, `.gitignore` hardened, 3247 → 136 tracked files. `data/` (orbit.db, audit log) never leaked — verified.
+2. ~~**The 3 PM briefing case**~~ — **DONE, Phase 3.16** (pending field test). Four verified layers: (a) bare "Um" committed because short transcripts get the *shortest* endpoint pause (`OrbitSpeechInputController.swift:258`) and the only send-guard is non-empty; (b) "Approach B" (`main.py:673-684`) prepends all non-PAST life events INTO the user message, so "Um" became a context recital request — reconstructed byte-for-byte from turns 1349-1352; (c) `_temporal_label` has no intra-day staleness, so a 10 AM breakfast plan reads "current" at 6 PM; (d) Approach B has no novelty tracking (unlike nudges), so "okay?" got the identical recital again. Fix: filler-only commits never sent; Approach B replaced by a proactivity governor (novelty + relevance + budget); ages not labels; structural repetition guard; greet once per session.
 3. **Memory pollution sweep** — `personal_knowledge` is mostly raw transcript from the old regex extractor ("I want to delete few reminders" as a *goal*); tool operations recorded as life events. One-time brain-driven cleanup + extraction filters.
-4. **Temporal label bug** — after one day, `weekend`/`next-week` events are labelled `PAST (yesterday)` (verified by running `_temporal_label`); future plans read as history.
+4. ~~**Temporal label bug**~~ — **DONE, Phase 3.16** (same function as the staleness fix; regression-tested in `tests/test_temporal_labels.py`).
 5. **Duplicate turn-save bug** — "turn off the wifi" saved six times in the same second (turns 1355-1366), one copy raw plumbing ("set_system_feature: Wi-Fi is off.") as an assistant turn. Trace-first diagnosis, then idempotent saves.
 6. **CI** — repo is on GitHub now; wire pytest (96) + wake corpus (203) + reminder corpus into GitHub Actions.
 
@@ -1142,6 +1142,44 @@ That is not a prompt problem. A correction is **one** operation and needed **one
 `CalendarService.updateEvent`. It preserves the existing duration when only the time moves, so
 rescheduling cannot silently reset a two-hour block to the default hour. The tool description
 tells the brain explicitly not to delete-and-recreate to make a change. Brain tool count 24 → 25.
+
+### Phase 3.16 — DONE (2026-08-03): the 3 PM briefing fix package
+
+Ayush woke ORBIT, said "Um" while thinking — and got a full recital of his morning's plans,
+including "you're planning a quick breakfast now" at 3 PM. Then "okay?" got the identical
+recital again. Diagnosed from turns 1349-1352 and the real code (no guessing this time);
+four independent layers, all fixed:
+
+1. **The ears committed a thinking sound.** Short transcripts got the SHORTEST endpoint
+   pause, so a bare "Um" committed fastest of all; the only send-guard was non-empty.
+   New `OrbitUtteranceCleanup.isFillerOnly` — filler-only utterances get a 6 s window
+   instead, and if nothing follows they never leave the Mac (both wake and panel paths,
+   guarded at the one shared controller). 16 new corpus cases.
+2. **"Approach B" rewrote his message.** `build_messages` prepended every non-PAST life
+   event INTO the user message — "Um" became a context recital request. Deleted. Events
+   live in the system prompt with ages and hard usage rules ("context, not content").
+   Volunteering is now structural: nudges are offered to the model only when the message
+   is a conversational opener (`_is_conversational_opener`), never on substantive turns.
+3. **No intra-day staleness — and the #3 temporal bug, same function.** `_temporal_label`
+   rewritten: every spoken date word resolves against the day it was SAID ("next-week"
+   shared yesterday is no longer PAST), morning "today" plans flip to "EARLIER TODAY —
+   LIKELY DONE" after 3 h, ages rendered human ("shared 5 hours ago"). Also fixed a silent
+   3-hour skew: DB timestamps are UTC (SQLite CURRENT_TIMESTAMP) but were compared against
+   local time.
+4. **Nothing prevented repeating.** Structural near-duplicate guard (difflib ≥ 0.85 vs the
+   last 3 assistant turns, short replies exempt) with ONE regeneration; and a repeated
+   time-of-day greeting is stripped ("Afternoon, Ayush." at most once per stretch).
+
+**Verified:** 115/115 pytest (19 new: temporal matrix, opener/dup/greeting), reminder +
+wake corpora green, clean xcodebuild — and the two failing inputs replayed live against
+the fixed backend:
+
+```
+"Um"                        →  "Yep? Take your time—no rush. What's up?"
+"I am going for a bath now" →  "Sounds good. Enjoy your bath—I'll be here when you get back."
+```
+
+Backend restarted; **Xcode rebuild (Cmd+R) required** for the ears fix. Protocol unchanged.
 
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
