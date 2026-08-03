@@ -1517,6 +1517,54 @@ lesson as the name resolution: prompting is not enforcement.
 Verified: **192 pytest**, all five corpora, clean xcodebuild. **Xcode rebuild required** for
 the reminder fixes.
 
+### Phase 3.26 — DONE (2026-08-03): discretion costs ORBIT its timing, not its curiosity
+
+Ayush's correction to 3.25: *"why is it like I always lead — he can do either."* If ORBIT
+genuinely wants to know something, that is ORBIT's to raise.
+
+The discretion guard used to **delete** the private question when someone was in the room.
+That protected his privacy and threw away the one thing that makes ORBIT feel like it has a
+mind of its own: that it actually wanted to know. The question is now **parked** — only the
+sentence that carried it, not the whole reply — and surfaces once the room is clear.
+
+His scenario, implemented end to end:
+- ORBIT may **ask first** — *"are you on your own?"* — before raising anything private, and
+  drop it gracefully if someone is there, without making it strange for anyone
+- *"I'm alone now"* clears the company state as surely as *"she left"*
+- he can open the door himself — *"what did you want to ask me?"* — and the parked question
+  comes back, asked in ORBIT's own words but **not watered down into a safer question**
+  (measured: the first version softened *"how do you feel about Shreel"* into *"planning more
+  hangouts?"*, so the instruction had to be explicit)
+- parked questions expire after **three days** and are asked **once** — a companion that keeps
+  circling the same question is not curious, it is stuck
+
+### Phase 3.27 — DONE (2026-08-03): barge-in, behind a toggle, default off
+
+**The risk finding that shaped this:** `OrbitWakeWordController` owns a **separate**
+`AVAudioEngine` from `OrbitSpeechInputController`. Echo cancellation is applied only to the
+voice-session engine, so the wake path — a month of tuning — is not in that signal chain at
+all. The original worry (that this touched the wake word) turned out not to apply.
+
+New setting **"Let me interrupt ORBIT while he's speaking"** (gear → Voice),
+`orbitMac.allowBargeIn`, **default off**. One toggle returns to previous behaviour, no rebuild.
+
+**AEC is the first line, content is the second.** macOS voice processing removes most speaker
+leakage, but "most" is not a guarantee — it varies with volume, room, and headphones vs
+speakers. So whatever the mic returns while ORBIT is speaking is also compared against what
+ORBIT is *currently saying*, and a match is discarded. Hardware cancellation can fail quietly;
+content matching cannot — the words either match or they don't.
+
+- **"Stop" always wins**, checked *before* any echo test, because that is the one thing that
+  can never be ignored — even when ORBIT happens to be saying the word "stop" itself
+- **Conservative on purpose:** filler and single stray words never interrupt. Chopping ORBIT
+  off for a cough is more irritating than waiting
+- **The interrupting words are not used as the message.** Mid-speech audio is echo-prone, and
+  acting on a half-heard phrase is how ORBIT would do the wrong thing confidently. ORBIT stops,
+  then a normal listening session takes over
+
+New `Tests/run-bargein-corpus.sh` in CI. Verified: **202 pytest**, six corpora, clean
+xcodebuild. **Xcode rebuild required**, then enable the toggle to try it.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias
