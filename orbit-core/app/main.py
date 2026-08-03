@@ -1951,22 +1951,26 @@ async def chat_tool_result(payload: ToolResultRequest) -> ChatResponse:
                     importance=score,
                     conflict_sig=conflict_signature(candidate),
                 )
-        for ev in extract_life_events(source_text):
-            memory.add_life_event(
-                ev["summary"],
-                category=ev.get("category", "general"),
-                emotion=ev.get("emotion"),
-                event_date=ev.get("event_date"),
-                importance=ev.get("importance", 0.5),
-            )
+        # Same gate as /chat: the regex extractors are the no-brain fallback, not a second
+        # writer running alongside the LLM pass. This path was missed in the first cut of
+        # the fix — every tool confirmation was still feeding the junk pipeline.
+        if not s.brain_api_key.strip():
+            for ev in extract_life_events(source_text):
+                memory.add_life_event(
+                    ev["summary"],
+                    category=ev.get("category", "general"),
+                    emotion=ev.get("emotion"),
+                    event_date=ev.get("event_date"),
+                    importance=ev.get("importance", 0.5),
+                )
+            for pk in extract_personal_knowledge(source_text):
+                memory.add_personal_knowledge(
+                    pk["category"], pk["fact"], pk.get("importance", 0.5), source_text[:100]
+                )
         emotion_result = detect_emotion(source_text)
         if emotion_result:
             emotion_label, emotion_score = emotion_result
             memory.log_mood(emotion_label, emotion_score, source_text[:100])
-        for pk in extract_personal_knowledge(source_text):
-            memory.add_personal_knowledge(
-                pk["category"], pk["fact"], pk.get("importance", 0.5), source_text[:100]
-            )
         memory.prune_semantic_memory(
             retention_days=s.semantic_memory_retention_days,
             max_items=s.semantic_memory_max_items,

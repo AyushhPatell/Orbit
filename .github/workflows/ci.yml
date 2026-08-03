@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Python backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        working-directory: orbit-core
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Tests
+        working-directory: orbit-core
+        # No .env and no ORBIT_DB_PATH here on purpose: the suite must pass with no
+        # secrets and must never depend on a real database. tests/conftest.py isolates
+        # the store — before it existed, every run wrote 12 turns into the live DB.
+        run: python -m pytest tests -q
+
+  voice-corpora:
+    name: Swift voice corpora (wake + reminder)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wake corpus (203 phrases)
+        working-directory: orbit-core/app/ORBITMac/Tests
+        run: ./run-wake-corpus.sh
+
+      - name: Reminder / calendar parsing corpus
+        working-directory: orbit-core/app/ORBITMac/Tests
+        run: ./run-reminder-corpus.sh
+
+  app-build:
+    name: ORBITMac builds
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (no signing — CI has no certificate)
+        working-directory: orbit-core/app/ORBITMac
+        run: |
+          xcodebuild -project ORBITMac.xcodeproj -scheme ORBITMac \
+            -configuration Debug -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build | tail -30

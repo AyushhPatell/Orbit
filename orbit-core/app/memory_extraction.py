@@ -159,17 +159,36 @@ _DEVICE_ACTION_RE = re.compile(
 )
 
 # ORBIT's own artefacts. A reminder or note is not a life event — the Reminders and Notes
-# apps already hold it, and ORBIT can read them back with a tool. Calendar *plans* are
-# deliberately NOT in this list: "call with Kawan Thursday 2 PM" is a real commitment
-# worth remembering, even when the sentence describing it came from bookkeeping.
+# apps already hold it, and ORBIT can read them back with a tool. Duplicating them into
+# memory is what lets memory drift out of sync with the truth and speak stale plans.
+#
+# The line is drawn on VOICE, not topic: a record ABOUT the artefact or the operation
+# ("Reminder to buy tickets is set for 5 PM", "Confirmed deletion of the call") is
+# bookkeeping and goes. A record of the EVENT ("Call scheduled with Kawan Thursday at
+# 2 PM", "Has a meeting with a professor at 2 PM") is a real commitment and stays.
 _ARTEFACT_CRUD_RE = re.compile(
     r"(?:"
+    # verb ... artefact  ("set a reminder", "deleted the note")
     r"\b(?:set|setting|create[ds]?|creating|delete[ds]?|deleting|remove[ds]?|removing|add(?:ed|s|ing)?|"
     r"updat(?:e|ed|ing)|schedul(?:e|ed|ing)|complet(?:e|ed|ing)|mark(?:ed|s|ing)?|clear(?:ed|s|ing)?)\b"
     r"[^.;]{0,40}?\b(?:reminders?|alarms?|notes?)\b"
     r"|"
+    # artefact ... was/is verbed  ("the reminder is set for 5 PM")
     r"\b(?:reminders?|alarms?|notes?)\b[^.;]{0,40}?\b(?:was|were|is|are|have\s+been|has\s+been)\s+"
     r"(?:set|created|deleted|removed|added|updated|scheduled|completed|cleared)\b"
+    r"|"
+    # the summary IS the artefact  ("Reminder to buy tickets for the movie at 5 PM")
+    r"^\s*(?:a\s+|the\s+|new\s+)?(?:reminders?|alarms?|notes?)\b"
+    r"|"
+    # being reminded is reminder bookkeeping however it is phrased
+    r"\b(?:asked\s+to\s+be\s+reminded|reminded\s+to|reminder\s+(?:for|to|about))\b"
+    r"|"
+    # confirming an operation is bookkeeping regardless of the object
+    r"\bconfirm(?:ed|s|ing)?\s+(?:the\s+)?(?:deletion|removal|cancellation)\b"
+    r"|"
+    # passive deletion of a scheduled thing — the record is about the filing, not the life
+    r"\b(?:call|event|meeting|appointment)\b[^.;]{0,40}?\b(?:was|were|has\s+been|have\s+been)\s+"
+    r"(?:deleted|removed|cancelled|canceled)\b"
     r")",
     re.IGNORECASE,
 )

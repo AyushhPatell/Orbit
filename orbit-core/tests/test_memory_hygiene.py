@@ -23,6 +23,11 @@ REAL_TOOL_LOG_ENTRIES = [
     "Spiderman movie ticket reminder is set for 5 PM today.",
     "Requested to delete a few reminders",
     "Deleted reminder to buy tickets for Spider-Man and set a new reminder",
+    # Found only by running the filter over the live table — the first pass missed all four.
+    "Reminder to buy tickets for the Spiderman movie at 5 PM today",
+    "Asked to be reminded to buy tickets for Spiderman on Tuesday",
+    "Confirmed deletion of the call with Kan on Thursday at 2 PM; call with Kawan remains",
+    "Call with Kan on Thursday at 2 PM was deleted; call with Kawan at the same time remains scheduled.",
 ]
 
 REAL_LIFE_ENTRIES = [
@@ -57,12 +62,17 @@ def test_device_actions_are_filtered() -> None:
         assert is_tool_operation(summary), summary
 
 
-def test_calendar_plans_are_kept_deliberately() -> None:
-    # A calendar commitment is a real plan worth remembering, even when the sentence
-    # describing it came out of bookkeeping. Only ORBIT's own artefacts (reminders,
-    # alarms, notes) are excluded — those live in their own apps and are read by tool.
-    assert not is_tool_operation("Call with Kawan on Thursday at 2 PM")
+def test_the_line_is_voice_not_topic() -> None:
+    """A record ABOUT the artefact or the operation is bookkeeping; a record of the EVENT
+    is a real commitment. Same topic, opposite verdicts — this is the whole rule."""
+    assert is_tool_operation("Reminder to buy tickets for the Spiderman movie at 5 PM")
+    assert not is_tool_operation("Excited about the Spiderman movie tonight")
+
+    assert is_tool_operation("Confirmed deletion of the call with Kan on Thursday")
+    assert not is_tool_operation("Call scheduled with Kawan on Thursday at 2 PM")
+
     assert not is_tool_operation("Has a meeting with Priya on Thursday")
+    assert not is_tool_operation("Has a 30-minute meeting with a professor at 2:00 PM")
 
 
 def test_clean_events_drops_tool_operations() -> None:
