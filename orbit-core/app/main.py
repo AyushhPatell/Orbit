@@ -36,6 +36,7 @@ from app.models import (
     ToolCallInfo,
     ToolResultRequest,
 )
+from app.people import corrections_note, people_prompt_block, resolve_people_in_text
 from app.pii_redact import redact_messages_copy, redact_text
 from app.providers.brain import chat_with_brain, resume_after_tool
 from app.providers.cloud import chat_with_cloud, stream_cloud
@@ -801,6 +802,7 @@ def build_messages(
     semantic_hits: Optional[list[str]] = None,
     style_prefs: Optional[dict[str, float]] = None,
     presence_note: Optional[str] = None,
+    name_corrections: Optional[list] = None,
 ) -> list[Message]:
     profile = load_profile(profile_path)
     recent = recent_turns if recent_turns is not None else memory.recent_turns(session_id=session_id, limit=8)
@@ -808,6 +810,13 @@ def build_messages(
     if facts:
         profile = profile + "\n\n### Curated facts (trust these until the user contradicts them)\n"
         profile += "\n".join(f"- {f}" for f in facts)
+    known_people = memory.all_people()
+    if known_people:
+        profile += people_prompt_block(known_people)
+        # The message arrives already corrected (see `corrected_message` in /chat); this
+        # only reports what was repaired so the brain doesn't reintroduce the misheard form.
+        profile += corrections_note(name_corrections or [])
+
     # Personal knowledge: structured understanding of Ayush built over time
     core_profile = memory.get_core_profile(max_per_category=3)
     if core_profile:
@@ -1616,11 +1625,18 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         payload.route_hint,
         cloud_min_chars=s.cloud_fallback_min_chars,
     )
+    # Repair misheard names once, at the door. Everything downstream — the brain, the tool
+    # calls, semantic recall and what gets written to memory — then works with the real
+    # person, so a mishearing cannot propagate into history and confuse later turns.
+    corrected_message, name_corrections = resolve_people_in_text(
+        payload.message, memory.all_people()
+    )
+
     recent_turns = memory.recent_turns(session_id=payload.session_id, limit=8)
     style_prefs = memory.style_preferences()
     semantic_hits = (
         memory.semantic_search(
-            payload.message,
+            corrected_message,
             limit=4,
             min_score=s.semantic_memory_min_score,
         )
@@ -1637,7 +1653,7 @@ async def chat(payload: ChatRequest) -> ChatResponse:
 
     messages = build_messages(
         payload.session_id,
-        payload.message,
+        corrected_message,
         s.profile_path,
         route=route,
         tooling_context=payload.tooling_context,
@@ -1648,6 +1664,7 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         semantic_hits=semantic_hits,
         style_prefs=style_prefs,
         presence_note=presence_note,
+        name_corrections=name_corrections,
     )
 
     model: Optional[str] = None
@@ -1918,14 +1935,16 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             "said": departure["said"],
         }))
 
-    user_for_store = content_for_storage(payload.message, redact_local_storage=s.redact_local_storage)
+    # Store the corrected text, not the raw transcript: a misheard name written into
+    # history resurfaces as context on every later turn.
+    user_for_store = content_for_storage(corrected_message, redact_local_storage=s.redact_local_storage)
     reply_for_store = content_for_storage(reply, redact_local_storage=s.redact_local_storage)
     if payload.save_memory:
         memory.append_turn(payload.session_id, "user", user_for_store)
         memory.append_turn(payload.session_id, "assistant", reply_for_store)
     update_style_preferences_from_user_message(payload.message)
     if payload.save_memory and s.semantic_memory_enabled:
-        source_text = user_for_store if s.redact_local_storage else payload.message
+        source_text = user_for_store if s.redact_local_storage else corrected_message
         # The third regex writer, gated like the other two. Measured on the live DB: every
         # one of the 19 stored vectors was verbatim conversational debris ("I am doing good,
         # thank for asking!", "Nothing, I'm just being lazy") — nothing a companion should

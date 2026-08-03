@@ -162,6 +162,23 @@ class MemoryStore:
                 conn.execute("ALTER TABLE semantic_vectors ADD COLUMN conflict_sig TEXT")
             except sqlite3.OperationalError:
                 pass
+            # People ORBIT knows by name. Speech recognition splits one friend into several
+            # strangers — "Kavan" was stored as both "Kawan" and "Kan" in the calendar, and
+            # nothing connected them. Aliases are the heard variants of one real person.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS people (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    relationship TEXT NOT NULL DEFAULT '',
+                    aliases TEXT NOT NULL DEFAULT '[]',
+                    notes TEXT NOT NULL DEFAULT '',
+                    importance REAL NOT NULL DEFAULT 0.6,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             # When the user names a clock time ("the movie is at 5"), keep the resolved UTC
             # instant. Coarse labels like "today" cannot tell 4 PM from 9 PM, so ORBIT either
             # asked how something went before it happened, or spoke of a finished thing as
@@ -927,6 +944,78 @@ class MemoryStore:
                 "SELECT COALESCE(MAX(id), 0) FROM turns WHERE session_id = ?", (session_id,)
             ).fetchone()
         return int(row[0]) if row else 0
+
+    def upsert_person(
+        self,
+        name: str,
+        *,
+        relationship: str = "",
+        aliases: Optional[list[str]] = None,
+        notes: str = "",
+        importance: float = 0.6,
+    ) -> None:
+        cleaned = name.strip()
+        if not cleaned:
+            return
+        payload = json.dumps(sorted({a.strip().lower() for a in (aliases or []) if a.strip()}))
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO people (name, relationship, aliases, notes, importance)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    relationship = excluded.relationship,
+                    aliases      = excluded.aliases,
+                    notes        = excluded.notes,
+                    importance   = excluded.importance,
+                    updated_at   = CURRENT_TIMESTAMP
+                """,
+                (cleaned, relationship, payload, notes, max(0.0, min(1.0, float(importance)))),
+            )
+            conn.commit()
+
+    def all_people(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, name, relationship, aliases, notes, importance FROM people "
+                "ORDER BY importance DESC, name ASC"
+            ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                aliases = json.loads(r[3])
+            except (json.JSONDecodeError, TypeError):
+                aliases = []
+            out.append({
+                "id": r[0], "name": r[1], "relationship": r[2],
+                "aliases": aliases, "notes": r[4], "importance": r[5],
+            })
+        return out
+
+    def add_person_alias(self, name: str, alias: str) -> None:
+        """Record a new way ORBIT heard someone's name, so it stops being a stranger."""
+        cleaned = alias.strip().lower()
+        if not cleaned:
+            return
+        with self._connect() as conn:
+            row = conn.execute("SELECT aliases FROM people WHERE name = ?", (name,)).fetchone()
+            if row is None:
+                return
+            try:
+                aliases = set(json.loads(row[0]))
+            except (json.JSONDecodeError, TypeError):
+                aliases = set()
+            aliases.add(cleaned)
+            conn.execute(
+                "UPDATE people SET aliases = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?",
+                (json.dumps(sorted(aliases)), name),
+            )
+            conn.commit()
+
+    def delete_person(self, name: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM people WHERE name = ?", (name,))
+            conn.commit()
 
     def all_personal_knowledge(self) -> list[dict]:
         """Full rows, for the consolidation pass (which needs ids and importance)."""
