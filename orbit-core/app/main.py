@@ -18,7 +18,7 @@ from app.audit_log import append_chat_audit_event
 from app.calendar_grounding import ground_calendar_reply
 from app.config import get_settings
 from app.device_time import device_clock_prompt_block
-from app import memory_extraction
+from app import memory_consolidation, memory_extraction
 from app.memory import MemoryStore
 from app.models import (
     ChatRequest,
@@ -195,6 +195,16 @@ async def run_memory_extraction(session_id: str) -> int:
     if stored:
         logger.info("memory extraction stored %d items from %d turns", stored, len(new_turns))
     return stored
+
+
+async def run_consolidation() -> dict:
+    """The sleep cycle, off the reply path. Deterministic and non-destructive — duplicates
+    and finished events are marked resolved, never deleted."""
+    try:
+        return await asyncio.to_thread(memory_consolidation.consolidate, memory)
+    except Exception as exc:  # never let housekeeping break a conversation
+        logger.warning("consolidation skipped (%s)", exc)
+        return {}
 
 
 def _track_nudge_usage(reply: str, life_events: list) -> None:
@@ -514,6 +524,64 @@ def _temporal_label(event: dict, current_hour: int, *, now=None) -> str:
 
 
 _AWAY_KEY = "presence.away"
+_BRIEFING_KEY = "briefing.last"
+
+_BRIEFING_REQUEST_RE = re.compile(
+    r"\b(?:"
+    r"what(?:'?s| is| do i have)?\s+(?:on|up|going on|happening|my day|for today|today|planned)"
+    r"|catch me up|brief me|fill me in|what did i miss|any(?:thing)?\s+(?:new|today|planned)"
+    r"|(?:my|the)\s+(?:schedule|agenda|plans?)\b"
+    r"|how(?:'?s| is| does)\s+(?:my|the)\s+day\b"
+    r"|run\s+(?:me\s+)?(?:through|down)\b"
+    r"|\bmy\s+day\s+(?:look|going)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_briefing_request(text: str) -> bool:
+    """He is explicitly asking for the picture — the one time a rundown is wanted."""
+    return bool(_BRIEFING_REQUEST_RE.search(text or ""))
+
+
+def briefing_delta_note(raw_state: str, life_events: list, *, now=None) -> Optional[str]:
+    """When he asks again soon after a briefing, lead with what CHANGED.
+
+    Repeating a rundown he heard an hour ago is the same failure as the 3 PM recital, just
+    invited rather than volunteered. Anything he has already been told is named here so the
+    brain can skip past it instead of reciting it a second time.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        state = json.loads(raw_state)
+        last_at = datetime.strptime(state["at"], "%Y-%m-%d %H:%M:%S")
+        covered = [str(s) for s in state.get("covered", [])]
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return None
+    if not covered:
+        return None
+
+    current = now or datetime.utcnow()
+    gap = current - last_at
+    # A fresh day, or a long gap, deserves the full picture again.
+    if gap > timedelta(hours=6) or last_at.date() != current.date():
+        return None
+
+    current_summaries = {str(ev.get("summary")) for ev in life_events}
+    still_covered = [c for c in covered if c in current_summaries]
+    if not still_covered:
+        return None
+
+    minutes = int(gap.total_seconds() / 60)
+    when = f"{minutes} minutes ago" if minutes < 90 else f"{minutes // 60} hours ago"
+    listed = "\n".join(f"- {s}" for s in still_covered[:8])
+    return (
+        f"You already gave him a rundown {when}, covering:\n{listed}\n"
+        "Do NOT repeat those verbatim. Lead with anything NEW or CHANGED since then. "
+        "If nothing has changed, say so briefly and naturally in one line — "
+        "\"same as earlier, nothing new\" — rather than listing it all again."
+    )
 
 _DEPARTURE_PATTERNS = (
     r"\b(?:brb|be right back)\b",
@@ -1021,6 +1089,11 @@ def build_messages(
     )
     if presence_note:
         profile += "\n\n### He just came back\n" + presence_note + "\n"
+
+    if is_briefing_request(user_message):
+        delta = briefing_delta_note(memory.get_meta(_BRIEFING_KEY, ""), life_events)
+        if delta:
+            profile += "\n\n### He already had a rundown recently\n" + delta + "\n"
 
     adaptive_style = adaptive_style_prompt_block(recent, user_message, style_prefs=style_prefs)
     if adaptive_style:
@@ -1827,6 +1900,15 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         client_local_iso=payload.client_local_iso,
     )
 
+    if is_briefing_request(payload.message) and payload.save_memory:
+        from datetime import datetime as _dt
+        covered = [str(ev.get("summary")) for ev in memory.recent_life_events(limit=8, days=3)]
+        if covered:
+            memory.set_meta(_BRIEFING_KEY, json.dumps({
+                "at": _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "covered": covered,
+            }))
+
     departure = detect_departure(payload.message)
     if departure and payload.save_memory:
         from datetime import datetime as _dt
@@ -1844,14 +1926,19 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     update_style_preferences_from_user_message(payload.message)
     if payload.save_memory and s.semantic_memory_enabled:
         source_text = user_for_store if s.redact_local_storage else payload.message
-        for candidate, score in extract_scored_candidate_memories(source_text):
-            if score >= s.semantic_memory_min_score:
-                memory.add_semantic_memory(
-                    candidate,
-                    source="auto",
-                    importance=score,
-                    conflict_sig=conflict_signature(candidate),
-                )
+        # The third regex writer, gated like the other two. Measured on the live DB: every
+        # one of the 19 stored vectors was verbatim conversational debris ("I am doing good,
+        # thank for asking!", "Nothing, I'm just being lazy") — nothing a companion should
+        # recall. The LLM pass mirrors its distilled facts into semantic memory instead.
+        if not s.brain_api_key.strip():
+            for candidate, score in extract_scored_candidate_memories(source_text):
+                if score >= s.semantic_memory_min_score:
+                    memory.add_semantic_memory(
+                        candidate,
+                        source="auto",
+                        importance=score,
+                        conflict_sig=conflict_signature(candidate),
+                    )
         # Regex extraction is the OFFLINE fallback only. Phase 3.6 introduced the LLM
         # extractor to replace it, but never stopped the regex writers — so both ran on
         # every turn and the regex pair kept filing raw transcript as knowledge ("I want
@@ -1891,6 +1978,9 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         _track_nudge_usage(reply, recent_events)
         # Distil the conversation into real knowledge in the background — never on the reply path.
         asyncio.create_task(run_memory_extraction(payload.session_id))
+        # And once a day, consolidate: retire duplicates and events whose moment has passed.
+        if memory_consolidation.is_due(memory):
+            asyncio.create_task(run_consolidation())
 
     mem_debug = (
         MemoryDebug(

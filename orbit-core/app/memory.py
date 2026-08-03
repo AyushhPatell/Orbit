@@ -928,6 +928,22 @@ class MemoryStore:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def all_personal_knowledge(self) -> list[dict]:
+        """Full rows, for the consolidation pass (which needs ids and importance)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, category, fact, importance, created_at FROM personal_knowledge ORDER BY id"
+            ).fetchall()
+        return [
+            {"id": r[0], "category": r[1], "fact": r[2], "importance": r[3], "created_at": r[4]}
+            for r in rows
+        ]
+
+    def delete_personal_knowledge(self, fact_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM personal_knowledge WHERE id = ?", (fact_id,))
+            conn.commit()
+
     def existing_knowledge_facts(self, limit: int = 120) -> list[str]:
         """Current facts, so the extractor can be told not to repeat what is already known."""
         with self._connect() as conn:

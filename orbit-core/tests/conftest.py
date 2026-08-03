@@ -35,9 +35,14 @@ from app.memory import MemoryStore
 TEST_BRAIN_KEY = "test-brain-key-not-a-real-secret"
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True)
 def isolate_memory_store():
-    """Point app.main.memory at a temp DB, and pin settings, for the whole session."""
+    """A fresh temp DB and pinned settings for **every** test.
+
+    Function-scoped on purpose: a shared store let one test's rows and meta keys change
+    another's result — the consolidation tests started failing depending on run order,
+    which is the same class of hidden coupling as writing to the production DB.
+    """
     tmpdir = tempfile.mkdtemp(prefix="orbit-tests-")
     db_path = Path(tmpdir) / "test-orbit.db"
 
@@ -60,6 +65,25 @@ def isolate_memory_store():
     finally:
         main.memory = real_store
         main.get_settings = real_settings
+
+
+@pytest.fixture(autouse=True)
+def deterministic_embedder():
+    """Tests must not depend on whether Ollama happens to be running.
+
+    `app.main` calls `configure_embedder()` at import, so on Ayush's Mac the suite would
+    quietly use real 768-dim embeddings while CI used the hash fallback — the same result
+    scored differently in the two places. Off by default; a test that wants semantic
+    behaviour stubs it explicitly.
+    """
+    import app.semantic_memory as sm
+
+    saved = sm._provider
+    sm._provider = None
+    try:
+        yield
+    finally:
+        sm._provider = saved
 
 
 @pytest.fixture(autouse=True)

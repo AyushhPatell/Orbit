@@ -191,11 +191,27 @@ def embed_text(text: str, *, dims: int = 192) -> list[float]:
 
 
 def cosine_similarity(a: Iterable[float], b: Iterable[float]) -> float:
+    """True cosine similarity, in [-1, 1].
+
+    This was a bare dot product, which is only cosine when both vectors are unit length.
+    The hash fallback happens to produce those; `nomic-embed-text` does not — its vectors
+    have magnitude ~20, so scores came back around 150-350 instead of 0-1. Every stored
+    memory then cleared the 0.6 relevance gate in `semantic_search`, and ranking was skewed
+    by vector magnitude rather than meaning. Silent since real embeddings were switched on
+    (Phase 3.5): recall returned "the top few of everything" instead of "what is relevant".
+
+    Normalising here rather than at write time fixes existing rows with no re-embedding.
+    """
     aa = list(a)
     bb = list(b)
     if len(aa) != len(bb) or not aa:
         return 0.0
-    return sum(x * y for x, y in zip(aa, bb))
+    dot = sum(x * y for x, y in zip(aa, bb))
+    mag_a = math.sqrt(sum(x * x for x in aa))
+    mag_b = math.sqrt(sum(x * x for x in bb))
+    if mag_a == 0.0 or mag_b == 0.0:
+        return 0.0
+    return dot / (mag_a * mag_b)
 
 
 # ---------------------------------------------------------------------------
