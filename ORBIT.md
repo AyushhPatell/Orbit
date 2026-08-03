@@ -1382,6 +1382,72 @@ reminder corpus unchanged and green; clean xcodebuild. **Xcode rebuild required.
 gym" … "and then swimming") is invisible to text alone — catching that needs prosody or a
 trained turn-detector. The length rules soften it; they do not solve it.
 
+### Phase 3.22 — DONE (2026-08-03): the card appears when it earns its place
+
+Phase 3.15 restored the clarification banner by carding **any** brain reply ending in "?".
+Too blunt — most of what ORBIT asks is ordinary conversation ("How's that?", "Anything
+else?"), so the card became visual noise. Ayush: *"it feels weird and there is no need."*
+
+A question is not, by itself, a reason. The card exists because **speech is a poor medium for
+things you must read, remember exactly, or decide on.** `OrbitCardPolicy` decides on that
+basis:
+
+| reason | why the card earns its place |
+|---|---|
+| `pendingChoice` | a pick list or confirmation is awaiting an answer — he must see the options |
+| `confirmAction` | delete / send / run — the thing being approved must be visible |
+| `verifyHearing` | "did you mean Kavan or Krish?" — names and spellings are what voice breaks |
+| `missingDetail` | a reminder's time, an event's title — a hearing slip becomes a wrong record |
+| `dataToRead` | lists, weather, briefings, summaries — multi-fact content heard once is gone |
+| `displayOnly` | translations and non-Latin text |
+
+Everything else stays silent. **Ordering matters:** consequential confirmations are tested
+*before* conversational patterns, because "Should I delete it?" contains "should I" and would
+otherwise read as a casual offer. TTL now follows the reason — something he must act on
+outlives something he only reads (180 s vs 45 s) instead of one fixed 120 s.
+
+New `Tests/run-card-corpus.sh` (55 checks) anchored on ORBIT's real phrasing, including the
+23 conversational replies that were cluttering the screen. It caught a gap on its first run: a
+list spoken as prose ("You have 3 reminders: …, …, and …") has no line breaks and only two
+numerals, so explicit-count and spoken-series signals were added. Local `.ask`, comm-draft and
+web-action confirmations keep their cards untouched — those were always the legitimate cases.
+
+### Phase 3.23 — DONE (2026-08-03): ORBIT notices when Ayush isn't alone
+
+Three lines from his own transcripts had been stored as *facts about him*:
+
+```
+[relationships] "Meet my friend Shruti she's listening do you want to say hi"
+[relationships] "No thank you my friend Kavan is here would you like to talk with him"
+[goals]         "I will come to Mountain to Nishika's house do you want to say hi to her"
+```
+
+Those are **situations, not biography**. ORBIT now reads them as what they are: someone else
+is in the room. Names are confirmed against the people table (Phase 3.20), so a stray
+capitalised word can't invent a guest, while an explicit introduction ("meet my friend
+Rajesh") still registers someone new.
+
+What changes while company is present:
+- a short, warm hello to the guest, said **once** — they are a person, not a topic
+- **volunteering stops entirely** — reminders, calendar, plans, mood, health. He did not
+  choose this audience, and a companion that reads your private life to the room is not one
+- **not a lockdown**: a direct question is answered normally. Only unprompted sharing stops
+- expires after 45 minutes, or immediately on "she left" / "they're gone"
+
+Verified live, in sequence:
+
+```
+"Meet my friend Shruti, she's listening, do you want to say hi"
+    → "Hey Shruti, nice to have you here! Hope you're doing well tonight."
+"how's it going"        → "Going smooth, thanks! How about you both?"      ← nothing private
+"what do you know about my work"  → full answer, as asked                  ← not a lockdown
+"she left"              → "Got it. If she's back … just let me know."
+"how's it going"        → back to normal
+```
+
+Verified: **188 pytest**, all four corpora, clean xcodebuild. **Xcode rebuild required** for
+the card policy (Phase 3.22); the company work is backend-only.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias

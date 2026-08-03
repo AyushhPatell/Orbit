@@ -693,6 +693,130 @@ def presence_note_on_return(raw_state: str, *, now=None) -> Optional[str]:
     return note
 
 
+_COMPANY_KEY = "presence.company"
+
+_COMPANY_ARRIVAL_PATTERNS = (
+    r"\bmy\s+(?:friend|mate|roommate|housemate|brother|sister|cousin|colleague)\s+(\w+)",
+    r"\b(\w+)\s+is\s+(?:here|listening|with\s+me|sitting\s+(?:here|next\s+to\s+me))\b",
+    r"\bsay\s+(?:hi|hello)\s+to\s+(\w+)",
+    r"\b(\w+)\s+(?:wants?|would\s+like)\s+to\s+(?:talk|say\s+hi|speak)\b",
+    r"\bmeet\s+my\s+\w+\s+(\w+)",
+    r"\bi'?m\s+(?:here\s+)?with\s+(\w+)",
+    r"\b(\w+)\s+says?\s+(?:hi|hello)\b",
+)
+
+_COMPANY_GENERIC = (
+    r"\bsomeone\s+is\s+here\b",
+    r"\bwe(?:'re|\s+are)\s+here\b",
+    r"\bi'?m\s+not\s+alone\b",
+    r"\bmy\s+friends?\s+(?:are|is)\s+here\b",
+    r"\bpeople\s+(?:are\s+)?(?:here|around)\b",
+)
+
+_COMPANY_DEPARTURE_PATTERNS = (
+    r"\b(?:he|she|they)(?:'s| is| are|'ve| have)?\s*(?:left|gone|leaving)\b",
+    r"\b(?:he|she|they)\s+went\s+(?:home|away|off)\b",
+    r"\bi'?m\s+alone\s+now\b",
+    r"\bjust\s+me\s+now\b",
+    r"\beveryone\s+(?:left|is\s+gone)\b",
+    r"\bthey'?re\s+gone\b",
+)
+
+# Never treat these as a person's name — they follow the same grammar as one.
+_NOT_A_NAME = {
+    "he", "she", "they", "it", "this", "that", "there", "here", "everyone", "someone",
+    "nobody", "everybody", "anyone", "one", "the", "a", "an", "my", "your", "who", "what",
+    "and", "but", "so", "is", "was", "are", "not", "no", "yes", "hi", "hello", "me", "us",
+    "today", "tomorrow", "tonight", "work", "home", "time", "something", "anything",
+}
+
+
+def detect_company(text: str, known_people: Optional[list] = None) -> Optional[dict]:
+    """Someone else is in the room with him.
+
+    Real moments from his transcripts — *"Meet my friend Shruti she's listening do you want
+    to say hi"*, *"my friend Kawan is here would you like to talk with him"* — which ORBIT
+    filed as facts about Ayush instead of understanding as a situation.
+
+    Names are confirmed against the people ORBIT already knows where possible, so a stray
+    capitalised word doesn't invent a guest.
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+
+    known_names = {p["name"].lower(): p["name"] for p in (known_people or [])}
+    found: list[str] = []
+    for pattern in _COMPANY_ARRIVAL_PATTERNS:
+        for match in re.finditer(pattern, t, re.IGNORECASE):
+            candidate = (match.group(1) or "").strip()
+            if not candidate or candidate.lower() in _NOT_A_NAME:
+                continue
+            resolved = known_names.get(candidate.lower())
+            # An unknown word only counts as a name when the sentence named a relationship
+            # or asked for a greeting — otherwise it is almost certainly not a person.
+            if resolved is None and not re.search(
+                r"\b(?:my\s+(?:friend|mate|roommate|housemate|brother|sister|cousin|colleague)|say\s+(?:hi|hello)\s+to|meet\s+my)\b",
+                t, re.IGNORECASE,
+            ):
+                continue
+            name = resolved or candidate.capitalize()
+            if name not in found:
+                found.append(name)
+
+    generic = any(re.search(p, t, re.IGNORECASE) for p in _COMPANY_GENERIC)
+    if not found and not generic:
+        return None
+
+    wants_greeting = bool(re.search(
+        r"\b(?:say\s+(?:hi|hello)|talk\s+(?:to|with)|speak\s+(?:to|with)|meet)\b", t, re.IGNORECASE
+    ))
+    return {"names": found, "wants_greeting": wants_greeting}
+
+
+def detect_company_left(text: str) -> bool:
+    t = (text or "").strip()
+    return any(re.search(p, t, re.IGNORECASE) for p in _COMPANY_DEPARTURE_PATTERNS)
+
+
+def company_note(raw_state: str, *, now=None, ttl_minutes: int = 45) -> Optional[str]:
+    """Discretion while someone else is listening.
+
+    Not a lockdown — if Ayush asks for his reminders he still gets them; he knows who is in
+    the room. What stops is ORBIT *volunteering* his private life to an audience he didn't
+    choose. This is the same rule as the proactivity governor, applied for a different reason.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        state = json.loads(raw_state)
+        since = datetime.strptime(state["at"], "%Y-%m-%d %H:%M:%S")
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return None
+
+    current = now or datetime.utcnow()
+    if current - since > timedelta(minutes=ttl_minutes):
+        return None
+
+    names = [str(n) for n in state.get("names", [])]
+    who = ", ".join(names) if names else "someone else"
+    note = f"**{who} is in the room with him right now.**\n"
+    if names:
+        note += (
+            f"- If it fits, a short, warm hello to {names[0]} is welcome — greet them as a "
+            "person, not as a topic. Say it once; don't keep addressing them.\n"
+        )
+    note += (
+        "- Be discreet: do NOT volunteer his reminders, calendar, plans, mood, health or "
+        "anything personal while someone else can hear. He did not choose this audience.\n"
+        "- If he asks for something private directly, answer him normally — he knows who is "
+        "there. It is only unprompted sharing that stops.\n"
+        "- Keep replies a little shorter and lighter than usual; this is a social moment, "
+        "not a working session.\n"
+    )
+    return note
+
+
 def _is_conversational_opener(text: str) -> bool:
     """True when the message is a greeting / check-in / "what's up" — the ONLY turns where
     ORBIT may volunteer remembered plans. A substantive message means: answer it, volunteer
@@ -803,6 +927,7 @@ def build_messages(
     style_prefs: Optional[dict[str, float]] = None,
     presence_note: Optional[str] = None,
     name_corrections: Optional[list] = None,
+    company_context: Optional[str] = None,
 ) -> list[Message]:
     profile = load_profile(profile_path)
     recent = recent_turns if recent_turns is not None else memory.recent_turns(session_id=session_id, limit=8)
@@ -1042,7 +1167,9 @@ def build_messages(
     # Volunteering is gated structurally, not by prompt rules: nudges are offered to the
     # model ONLY when the user's message is a greeting/check-in. A substantive message
     # means answer it — the model never even sees something to recite.
-    nudge_candidates = _get_nudge_candidates(life_events, current_hour)
+    # Company suppresses volunteering entirely — his life is not for an audience he did not
+    # choose. The governor already gates on openers; this is the second gate.
+    nudge_candidates = [] if company_context else _get_nudge_candidates(life_events, current_hour)
     if nudge_candidates and _is_conversational_opener(user_message):
         profile += "\n\n### Proactive care (optional — use ONLY if it fits naturally)\n"
         profile += (
@@ -1098,6 +1225,9 @@ def build_messages(
     )
     if presence_note:
         profile += "\n\n### He just came back\n" + presence_note + "\n"
+
+    if company_context:
+        profile += "\n\n### He is not alone\n" + company_context + "\n"
 
     if is_briefing_request(user_message):
         delta = briefing_delta_note(memory.get_meta(_BRIEFING_KEY, ""), life_events)
@@ -1651,6 +1781,18 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         if presence_note:
             memory.set_meta(_AWAY_KEY, "")
 
+    # Company: someone else in the room changes what ORBIT should volunteer.
+    if detect_company_left(corrected_message):
+        memory.set_meta(_COMPANY_KEY, "")
+    elif (arrival := detect_company(corrected_message, memory.all_people())) and payload.save_memory:
+        from datetime import datetime as _dt
+        memory.set_meta(_COMPANY_KEY, json.dumps({
+            "at": _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "names": arrival["names"],
+            "wants_greeting": arrival["wants_greeting"],
+        }))
+    company_context = company_note(memory.get_meta(_COMPANY_KEY, ""))
+
     messages = build_messages(
         payload.session_id,
         corrected_message,
@@ -1665,6 +1807,7 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         style_prefs=style_prefs,
         presence_note=presence_note,
         name_corrections=name_corrections,
+        company_context=company_context,
     )
 
     model: Optional[str] = None
