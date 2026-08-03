@@ -1,12 +1,32 @@
-.DS_Store
+# Secrets — never track any .env variant (backups included), only the example
+.env*
+!.env.example
+.env
+orbit-core/.env
+
+# Personal data stays local
+orbit-core/data/
+
+# Python
 __pycache__/
 .pycache/
 *.pyc
 *.pyo
 *.pyd
-
-.env
-orbit-core/.env
-orbit-core/.venv/
-orbit-core/data/
+.pytest_cache/
 *.egg-info/
+orbit-core/.venv/
+
+# Xcode build products & per-user state
+.derivedData/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Runtime state & logs
+orbit-core/.run/
+*.log
+*.pid
+
+# macOS
+.DS_Store

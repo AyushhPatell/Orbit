@@ -502,7 +502,18 @@ Rules:
 3. Before changing anything: what else reads this? where does data move? what gets invalidated?
 4. Small, reversible, in-scope fixes are still fine to just make.
 
-## WORK LIST — agreed 2026-08-02 (current)
+## WORK LIST — 2026-08-03 (current)
+
+Full detail in `docs/ORBIT_EVOLUTION.md` (the complete evolution map, written after the 3 PM briefing case).
+
+1. **URGENT — rotate the OpenAI key.** `orbit-core/.env.backup-2026-08-01` (contains `CLOUD_API_KEY`) was pushed to GitHub. Rotate at platform.openai.com, then `git rm` the backup and harden `.gitignore` (`.env*`, `.run/`, `.derivedData/`). `data/` (orbit.db, audit log) did NOT leak — verified.
+2. **The 3 PM briefing case — root cause found, fix package proposed, awaiting approval.** Four verified layers: (a) bare "Um" committed because short transcripts get the *shortest* endpoint pause (`OrbitSpeechInputController.swift:258`) and the only send-guard is non-empty; (b) "Approach B" (`main.py:673-684`) prepends all non-PAST life events INTO the user message, so "Um" became a context recital request — reconstructed byte-for-byte from turns 1349-1352; (c) `_temporal_label` has no intra-day staleness, so a 10 AM breakfast plan reads "current" at 6 PM; (d) Approach B has no novelty tracking (unlike nudges), so "okay?" got the identical recital again. Fix: filler-only commits never sent; Approach B replaced by a proactivity governor (novelty + relevance + budget); ages not labels; structural repetition guard; greet once per session.
+3. **Memory pollution sweep** — `personal_knowledge` is mostly raw transcript from the old regex extractor ("I want to delete few reminders" as a *goal*); tool operations recorded as life events. One-time brain-driven cleanup + extraction filters.
+4. **Temporal label bug** — after one day, `weekend`/`next-week` events are labelled `PAST (yesterday)` (verified by running `_temporal_label`); future plans read as history.
+5. **Duplicate turn-save bug** — "turn off the wifi" saved six times in the same second (turns 1355-1366), one copy raw plumbing ("set_system_feature: Wi-Fi is off.") as an assistant turn. Trace-first diagnosis, then idempotent saves.
+6. **CI** — repo is on GitHub now; wire pytest (96) + wake corpus (203) + reminder corpus into GitHub Actions.
+
+## WORK LIST — agreed 2026-08-02 (superseded items tracked above)
 
 Ayush's standing list. Items are marked done here as they land, so nothing depends on memory.
 
