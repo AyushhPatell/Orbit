@@ -509,8 +509,7 @@ final class OrbitWakeVoiceBackstage {
             voiceLoopFallbackTask?.cancel()
             voiceLoopFallbackTask = nil
             let createReply: String
-            do { createReply = try OrbitReminderService.shared.createReminder(title: title, dueDate: dueDate) }
-            catch { createReply = "Sorry, I couldn\u{2019}t save the reminder: \(error.localizedDescription)" }
+            createReply = await OrbitReminderService.shared.createReminder(title: title, dueDate: dueDate)
             let willResume = UserDefaults.standard.bool(forKey: "orbitMac.continuousVoiceMode")
             OrbitVoiceSession.shared.transition(to: .responding(
                 ResponsePlan(willResume: willResume, lastReplyWasQuestion: false)
@@ -782,8 +781,7 @@ final class OrbitWakeVoiceBackstage {
             } catch {
                 parts.append("couldn\u{2019}t create calendar event: \(error.localizedDescription)")
             }
-            do { parts.append(try OrbitReminderService.shared.createReminder(title: remTitle, dueDate: remDue)) }
-            catch { parts.append("couldn\u{2019}t save reminder: \(error.localizedDescription)") }
+            parts.append(await OrbitReminderService.shared.createReminder(title: remTitle, dueDate: remDue))
             let bothReply = parts.joined(separator: ". ")
             let willResume = UserDefaults.standard.bool(forKey: "orbitMac.continuousVoiceMode")
             OrbitVoiceSession.shared.transition(to: .responding(

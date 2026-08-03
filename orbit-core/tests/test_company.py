@@ -102,9 +102,9 @@ def test_note_asks_for_discretion_and_a_greeting() -> None:
     note = company_note(_state(5, ["Shruti"]), now=NOW)
     assert note is not None
     assert "Shruti" in note
-    assert "do NOT volunteer" in note
-    # Not a lockdown: a direct question is still answered.
-    assert "answer him normally" in note
+    assert "Don't volunteer his reminders" in note
+    # Not a lockdown: he can still lead the conversation wherever he wants.
+    assert "follow his lead" in note
 
 
 def test_company_expires() -> None:
@@ -120,3 +120,57 @@ def test_generic_company_still_produces_discretion() -> None:
 def test_corrupt_state_is_ignored() -> None:
     assert company_note("not json", now=NOW) is None
     assert company_note("", now=NOW) is None
+
+
+def test_sensitive_probes_are_recognised() -> None:
+    """Ayush's own framing: things that are fine one-to-one and mortifying in front of
+    friends. These must never come out of a speaker with company in the room."""
+    from app.main import contains_sensitive_probe
+
+    for text in [
+        "Is this girl and you something?",
+        "How do you feel about Shruti?",
+        "Are you two together?",
+        "Is there something going on between you?",
+        "Do you like her?",
+        "Have you been seeing anyone lately?",
+        "Are you still feeling anxious about it?",
+        "How much do you earn at HRM?",
+        "Did you have a fight with your mum?",
+    ]:
+        assert contains_sensitive_probe(text), text
+
+
+def test_ordinary_personal_talk_is_not_sensitive() -> None:
+    """Being discreet is not being cold — these stay allowed even with company around."""
+    from app.main import contains_sensitive_probe
+
+    for text in [
+        "How long have you known Shreel?",
+        "Where did you two first meet?",
+        "What does Kavan do?",
+        "How's your shift going?",
+        "What are you up to tonight?",
+        "How are you feeling today?",
+        "Where are you right now?",
+        "How do you feel about that idea?",     # about a thing, not a person
+        "Want me to put some music on?",
+    ]:
+        assert not contains_sensitive_probe(text), text
+
+
+def test_curiosity_is_permission_not_instruction() -> None:
+    """A scheduled question is exactly what Ayush said he does not want."""
+    from app.main import CURIOSITY_BLOCK
+
+    assert "permission, NOT an instruction" in CURIOSITY_BLOCK
+    assert "Most turns need no question at all" in CURIOSITY_BLOCK
+    assert "only ever when you two are alone" in CURIOSITY_BLOCK
+
+
+def test_company_note_forbids_intimate_topics_but_allows_normal_talk() -> None:
+    note = company_note(_state(5, ["Shruti"]), now=NOW)
+    assert note is not None
+    assert "Never raise anything intimate" in note
+    assert "Ordinary conversation is still completely fine" in note
+    assert "follow his lead" in note

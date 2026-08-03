@@ -66,10 +66,38 @@ final class OrbitReminderService {
 
     // MARK: - Create
 
-    func createReminder(title: String, dueDate: Date?, notes: String? = nil) throws -> String {
+    /// Creates a reminder unless the same task is already on the list.
+    ///
+    /// Confirming an existing reminder used to make a second one: "yes I am ready" produced a
+    /// duplicate of a reminder set twenty minutes earlier, differing only by the word "the".
+    /// Nothing checked, so nothing stopped it.
+    func createReminder(title: String, dueDate: Date?, notes: String? = nil) async -> String {
         guard hasAccess else {
             return "I don't have access to Reminders. Please allow access in System Settings → Privacy & Security → Reminders."
         }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let predicate = store.predicateForIncompleteReminders(
+            withDueDateStarting: nil, ending: nil, calendars: nil
+        )
+        let existing = await fetchRaw(predicate: predicate).filter { !$0.isCompleted }
+        if let duplicate = existing.first(where: {
+            OrbitReminderMatching.isSameTask($0.title ?? "", cleanTitle)
+        }) {
+            let existingTitle = duplicate.title ?? cleanTitle
+            if let comps = duplicate.dueDateComponents,
+               let date = Calendar.current.date(from: comps) {
+                return "That one's already on your list — \u{201C}\(existingTitle)\u{201D} \(Self.formatDueDate(date)). Nothing new added."
+            }
+            return "That one's already on your list — \u{201C}\(existingTitle)\u{201D}. Nothing new added."
+        }
+        do {
+            return try saveNewReminder(title: cleanTitle, dueDate: dueDate, notes: notes)
+        } catch {
+            return "Couldn't create the reminder: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveNewReminder(title: String, dueDate: Date?, notes: String? = nil) throws -> String {
         let reminder = EKReminder(eventStore: store)
         reminder.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         reminder.notes = notes
@@ -137,49 +165,88 @@ final class OrbitReminderService {
         let incomplete = raw.filter { !$0.isCompleted }
         guard !incomplete.isEmpty else { return "No pending reminders found." }
 
-        // Resolve pronouns ("it", "that", "this") to a concrete reminder title.
-        // First try lastListedTitles (set when ORBIT listed reminders via EventKit).
-        // Fall back to the live incomplete list — if there's only 1 pending reminder the
-        // reference is unambiguous even if the user got the list from the LLM.
-        let pronouns: Set<String> = ["it", "that", "this", "the reminder", "that reminder",
-                                      "this reminder", "the one", "that one", "this one"]
-        var q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        if pronouns.contains(q) {
-            if lastListedTitles.count == 1 {
-                q = lastListedTitles[0].lowercased()
-            } else if lastListedTitles.count > 1 {
-                let names = lastListedTitles.prefix(3).joined(separator: ", ")
-                return "Which reminder did you mean? You mentioned: \(names). Say the name and I\u{2019}ll mark it done."
-            } else if incomplete.count == 1 {
-                // Only 1 active reminder — unambiguous even without a prior listing.
-                q = (incomplete[0].title ?? "").lowercased()
-            } else if incomplete.count > 1 {
-                let names = incomplete.prefix(3).map { $0.title ?? "?" }.joined(separator: ", ")
-                return "Which reminder did you mean? You have: \(names). Say the name and I\u{2019}ll mark it done."
-            } else {
-                return "You don\u{2019}t have any pending reminders."
+        let titles = incomplete.map { $0.title ?? "" }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // A reference with no name in it — "it", "one more", "the other one", "mark them all".
+        // The old code only understood a handful of bare pronouns, so "there is one more
+        // reminder left" matched nothing and failed three times in a row.
+        if OrbitReminderMatching.isVagueReference(q) {
+            let pool = lastListedTitles.isEmpty ? titles : lastListedTitles
+            if OrbitReminderMatching.refersToMultiple(q) {
+                return await complete(indices: Array(incomplete.indices), in: incomplete)
             }
+            if incomplete.count == 1 {
+                return await complete(indices: [0], in: incomplete)
+            }
+            if OrbitReminderMatching.allSameTask(titles), !titles.isEmpty {
+                // Every pending reminder is the same task duplicated — no ambiguity to raise.
+                return await complete(indices: Array(incomplete.indices), in: incomplete)
+            }
+            let names = pool.prefix(3).joined(separator: ", ")
+            return "Which reminder did you mean? You have: \(names). Say the name and I\u{2019}ll mark it done."
         }
 
-        let match = incomplete.first { ($0.title ?? "").lowercased().contains(q) }
-            ?? incomplete.first { Self.levenshtein(($0.title ?? "").lowercased(), q) <= 3 }
-        guard let match else {
+        var found = OrbitReminderMatching.matches(query: q, titles: titles)
+        if found.isEmpty {
             return "I couldn\u{2019}t find a reminder matching \u{201C}\(q)\u{201D}. Try saying the reminder name clearly."
         }
-        // store.save runs on @MainActor — safe.
-        let title = match.title ?? "reminder"
-        let isRecurring = match.hasRecurrenceRules
-        match.isCompleted = true
-        match.completionDate = Date()
-        do {
-            try store.save(match, commit: true)
-            if isRecurring {
-                return "Done \u{2014} marked \u{201C}\(title)\u{201D} as complete. It\u{2019}s a recurring reminder, so the next occurrence will still show up."
-            }
-            return "Done \u{2014} marked \u{201C}\(title)\u{201D} as complete."
-        } catch {
-            return "Couldn\u{2019}t mark it complete: \(error.localizedDescription)"
+        // "mark those reminders done" must not stop after the first one, and several matches
+        // of the same task are one task duplicated — completing all of them is what was meant.
+        let matchedTitles = found.map { titles[$0] }
+        if found.count > 1,
+           !OrbitReminderMatching.refersToMultiple(q),
+           !OrbitReminderMatching.allSameTask(matchedTitles) {
+            let names = matchedTitles.prefix(3).joined(separator: ", ")
+            return "I found a few that match: \(names). Which one should I mark done?"
         }
+        if found.count > 1, !OrbitReminderMatching.refersToMultiple(q),
+           OrbitReminderMatching.allSameTask(matchedTitles) {
+            // Same task twice — complete every copy so none is left behind.
+            return await complete(indices: found, in: incomplete)
+        }
+        if !OrbitReminderMatching.refersToMultiple(q) {
+            found = [found[0]]
+        }
+        return await complete(indices: found, in: incomplete)
+    }
+
+    /// Marks each reminder complete and reports honestly on what happened, including any
+    /// that failed to save — a partial success must never be reported as a clean one.
+    private func complete(indices: [Int], in incomplete: [EKReminder]) async -> String {
+        var completed: [String] = []
+        var recurring = false
+        var failures: [String] = []
+        for index in indices where incomplete.indices.contains(index) {
+            let reminder = incomplete[index]
+            let title = reminder.title ?? "reminder"
+            recurring = recurring || reminder.hasRecurrenceRules
+            reminder.isCompleted = true
+            reminder.completionDate = Date()
+            do {
+                try store.save(reminder, commit: true)
+                completed.append(title)
+            } catch {
+                failures.append(title)
+            }
+        }
+        if completed.isEmpty {
+            return "Couldn\u{2019}t mark it complete\(failures.isEmpty ? "" : ": \(failures.joined(separator: ", "))")."
+        }
+        var reply: String
+        if completed.count == 1 {
+            reply = "Done \u{2014} marked \u{201C}\(completed[0])\u{201D} as complete."
+        } else {
+            reply = "Done \u{2014} marked all \(completed.count) as complete: "
+                + completed.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", ") + "."
+        }
+        if recurring {
+            reply += " One of those recurs, so the next occurrence will still show up."
+        }
+        if !failures.isEmpty {
+            reply += " I couldn\u{2019}t complete \(failures.joined(separator: ", "))."
+        }
+        return reply
     }
 
     // MARK: - Delete

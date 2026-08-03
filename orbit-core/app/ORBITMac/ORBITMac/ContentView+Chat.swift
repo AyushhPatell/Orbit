@@ -239,8 +239,7 @@ extension ContentView {
             voiceLoopFallbackTask = nil
             speechInput.stopListening()
             let createReply: String
-            do { createReply = try OrbitReminderService.shared.createReminder(title: title, dueDate: dueDate) }
-            catch { createReply = "Sorry, I couldn't save the reminder: \(error.localizedDescription)" }
+            createReply = await OrbitReminderService.shared.createReminder(title: title, dueDate: dueDate)
             responseText = createReply
             lastRoute = "reminder-create"
             lastModel = "on-device"
@@ -377,8 +376,7 @@ extension ContentView {
             } catch {
                 parts.append("couldn\u{2019}t create calendar event: \(error.localizedDescription)")
             }
-            do { parts.append(try OrbitReminderService.shared.createReminder(title: remTitle, dueDate: remDue)) }
-            catch { parts.append("couldn\u{2019}t save reminder: \(error.localizedDescription)") }
+            parts.append(await OrbitReminderService.shared.createReminder(title: remTitle, dueDate: remDue))
             let bothReply = parts.joined(separator: ". ")
             responseText = bothReply
             lastRoute = "calendar-reminder-create"

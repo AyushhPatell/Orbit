@@ -1448,6 +1448,75 @@ Verified live, in sequence:
 Verified: **188 pytest**, all four corpora, clean xcodebuild. **Xcode rebuild required** for
 the card policy (Phase 3.22); the company work is backend-only.
 
+### Phase 3.24 — DONE (2026-08-03): the duplicate reminder, and being made to recite a title
+
+Ayush's sequence, with his screenshot as evidence:
+
+```
+14:42  "going for a bath — when I return remind me to call Shreel, we have a get together
+        and dinner"                → "Call Shreel about get together and dinner"      ✓
+14:56  ORBIT: "are you ready about the reminder to call Shreel…"   "yes I am ready"
+                                   → "Call Shreel about the get together and dinner"  ✗ duplicate
+       "mark those reminders done"                → only ONE completed
+       "there is one more reminder left, mark it done"   → failed
+       "there is one more reminder left, mark it done"   → failed again
+       'mark "Call Shreel about get together and dinner" as done'  → finally worked
+```
+
+**Three independent defects**, all now fixed in `OrbitReminderMatching.swift` (pure functions,
+corpus-tested):
+
+1. **`createReminder` had no duplicate check at all.** Confirming an existing reminder simply
+   made another. The two titles differed by one word — "about **the** get together" — so
+   nothing downstream linked them. Titles are now compared the way a person would: case,
+   punctuation and meaningless small words ignored. A match answers *"That one's already on
+   your list"* instead of creating a second.
+2. **`completeReminder` used `incomplete.first { … }`** — structurally incapable of completing
+   more than one, so *"mark **those** reminders done"* was always going to leave one behind.
+   It now completes every match, and when several matches are the *same task duplicated* it
+   clears all copies rather than asking a pointless question. Genuinely different matches
+   still ask which one.
+3. **Vague references matched nothing.** Only a handful of bare pronouns were understood, so
+   *"there is one more reminder left"* found no title and failed three times. Being made to
+   recite an exact string back to an assistant is the opposite of the point. "one more", "the
+   other one", "the last one", "the rest", "mark them all" are all understood now, and when
+   exactly one reminder remains the reference is unambiguous.
+
+Partial failures are reported honestly — if one of several saves fails, the reply says so
+rather than claiming a clean sweep.
+
+New `Tests/run-reminder-matching-corpus.sh`, wired into CI, anchored on the real titles.
+Guarded against the opposite error too: six genuinely-different pairs ("Call Shreel" vs
+"Call Kavan", "Submit the assignment" vs "Submit the tax return") must **never** merge — a
+false duplicate silently swallows a reminder he asked for.
+
+### Phase 3.25 — DONE (2026-08-03): personal is not the same as private
+
+Refining Phase 3.23 after Ayush drew the line himself: ORBIT may know everything, but **what
+it says out loud depends on who can hear it.**
+
+- **Intimate** — who he likes, how he feels about a particular person, romance, health, money,
+  family tension. His example: *"is this girl and you are something"*. Never raised while
+  anyone else is in the room, not even hinted at.
+- **Ordinary personal** — how long he's known a friend, where they met, what they do, where he
+  is, what he's working on, his plans tonight, how he's feeling. Fine any time. *Being
+  discreet is not being cold.*
+- **He can always lead.** If he raises something himself, ORBIT follows — he knows who is
+  there. Only what ORBIT raises unprompted is restricted.
+
+**Curiosity is permission, never instruction.** ORBIT may ask about his life when something
+genuinely makes it want to know more — one short question, in the flow. Explicitly *not* a
+checklist: "most turns need no question at all", never twice about the same thing, and
+anything intimate only when they're alone. Ayush: *"this does not mean that he must ask me
+this things… he should ask me this if he really wants to know something."*
+
+**Enforced structurally, not by prompt.** If a draft reply raises something intimate while
+company is present — and Ayush didn't raise it himself — the reply is regenerated. Same
+lesson as the name resolution: prompting is not enforcement.
+
+Verified: **192 pytest**, all five corpora, clean xcodebuild. **Xcode rebuild required** for
+the reminder fixes.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias

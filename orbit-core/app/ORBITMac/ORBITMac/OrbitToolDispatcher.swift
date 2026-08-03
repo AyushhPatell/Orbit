@@ -100,7 +100,7 @@ enum OrbitToolDispatcher {
                 dueDate = parseISO8601(isoStr)
             }
             do {
-                return try svc.createReminder(title: title, dueDate: dueDate)
+                return await svc.createReminder(title: title, dueDate: dueDate)
             } catch {
                 return "Couldn't create reminder: \(error.localizedDescription)"
             }

@@ -52,6 +52,10 @@ jobs:
         working-directory: orbit-core/app/ORBITMac/Tests
         run: ./run-card-corpus.sh
 
+      - name: Reminder matching corpus
+        working-directory: orbit-core/app/ORBITMac/Tests
+        run: ./run-reminder-matching-corpus.sh
+
   app-build:
     name: ORBITMac builds
     runs-on: macos-latest

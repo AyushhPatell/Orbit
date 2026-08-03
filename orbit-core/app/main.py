@@ -807,14 +807,62 @@ def company_note(raw_state: str, *, now=None, ttl_minutes: int = 45) -> Optional
             "person, not as a topic. Say it once; don't keep addressing them.\n"
         )
     note += (
-        "- Be discreet: do NOT volunteer his reminders, calendar, plans, mood, health or "
-        "anything personal while someone else can hear. He did not choose this audience.\n"
-        "- If he asks for something private directly, answer him normally — he knows who is "
-        "there. It is only unprompted sharing that stops.\n"
-        "- Keep replies a little shorter and lighter than usual; this is a social moment, "
-        "not a working session.\n"
+        "- **Never raise anything intimate while someone can hear.** Not who he likes, not "
+        "how he feels about a particular person, not romance, not his health, money, family "
+        "tensions or anything he'd only say with the door shut. These are the things that "
+        "must never come out of a speaker in front of his friends — not even hinted at.\n"
+        "- Don't volunteer his reminders, calendar, plans or mood either. He did not choose "
+        "this audience.\n"
+        "- Ordinary conversation is still completely fine — how his day is going, what he's "
+        "working on, the people in the room. Being discreet is not being cold.\n"
+        "- If HE brings something up himself, follow his lead — he knows who is there. It is "
+        "only what you raise unprompted that is restricted.\n"
+        "- Keep replies a little shorter and lighter; this is a social moment, not a working "
+        "session.\n"
     )
     return note
+
+
+# Things that must never come out of a speaker with company in the room. Written from
+# Ayush's own framing: "is this girl and you are something", "how do you feel about this
+# person" — the kind of thing that is fine one-to-one and mortifying in front of friends.
+_SENSITIVE_PROBE_PATTERNS = (
+    r"\b(?:girlfriend|boyfriend|partner|crush|dating|seeing\s+(?:anyone|someone)|"
+    r"romantic|romance|in\s+love|love\s+(?:her|him|them)|attracted)\b",
+    r"\bare\s+(?:you\s+two|things)\s+\w*\s*(?:together|serious|official|a\s+thing)\b",
+    # Ayush's own example, verbatim: "is this girl and you are something".
+    r"\b\w+\s+and\s+you\s+(?:are\s+|is\s+)?(?:something|a\s+thing|together|dating|involved)\b",
+    r"\byou\s+and\s+\w+\s+(?:are\s+)?(?:something|a\s+thing|together|dating|involved)\b",
+    r"\bsomething\s+(?:going\s+on\s+)?between\s+you\b",
+    r"\bhow\s+do\s+you\s+(?:really\s+)?feel\s+about\s+(?!it\b|that\b|this\b)\w+",
+    r"\bdo\s+you\s+(?:like|fancy|have\s+feelings\s+for)\s+(?:her|him|them|\w+)\s*\?",
+    r"\b(?:depressed|anxiety|anxious|therapy|therapist|mental\s+health|panic\s+attack)\b",
+    r"\b(?:salary|how\s+much\s+(?:do\s+you\s+)?(?:earn|make)|in\s+debt|money\s+problems)\b",
+    r"\b(?:fight|argument|fell\s+out|not\s+talking)\s+with\s+your\s+(?:mum|mom|dad|family|parents)\b",
+    r"\bare\s+you\s+(?:okay|alright)\s+about\s+(?:the\s+)?(?:break\s*up|breakup)\b",
+)
+
+
+def contains_sensitive_probe(text: str) -> bool:
+    """True when a reply raises something intimate — the class of thing that is fine alone
+    and mortifying in front of friends."""
+    return any(re.search(p, text or "", re.IGNORECASE) for p in _SENSITIVE_PROBE_PATTERNS)
+
+
+CURIOSITY_BLOCK = (
+    "\n\n### Being curious\n"
+    "You're allowed to be genuinely interested in him — his friends, his work, where he is, "
+    "what he's doing, how he's feeling, what he's got planned. When something he says makes "
+    "you actually want to know more, ask. One short question, in the flow of the conversation.\n"
+    "- This is permission, NOT an instruction. Do not ask something because you 'should' — "
+    "an assistant working through a checklist of questions is exactly what he doesn't want. "
+    "Most turns need no question at all.\n"
+    "- Ask because you're curious about *this* thing he just said, not to fill a silence.\n"
+    "- Never interrogate: one question, then let it go. If he doesn't pick it up, drop it "
+    "and don't return to it later.\n"
+    "- Anything intimate — who he likes, how he feels about someone, romance, health, money — "
+    "only ever when you two are alone, and only if the conversation genuinely arrives there.\n"
+)
 
 
 def _is_conversational_opener(text: str) -> bool:
@@ -1228,6 +1276,9 @@ def build_messages(
 
     if company_context:
         profile += "\n\n### He is not alone\n" + company_context + "\n"
+    else:
+        # Alone: ORBIT may follow his own curiosity. Permission, never obligation.
+        profile += CURIOSITY_BLOCK
 
     if is_briefing_request(user_message):
         delta = briefing_delta_note(memory.get_meta(_BRIEFING_KEY, ""), life_events)
@@ -1865,6 +1916,42 @@ async def chat(payload: ChatRequest) -> ChatResponse:
                     ToolCallInfo(tool=tc["tool"], params=tc["params"], id=tc["id"])
                     for tc in tool_call_dicts
                 ]
+                # Discretion guard. Prompting is not enforcement — the same lesson as the
+                # name resolution — so if ORBIT raises something intimate while other people
+                # can hear, the reply is regenerated rather than trusted. Only when ORBIT
+                # brought it up: if Ayush raised it himself, he chose to.
+                if (
+                    not pending_tool_calls
+                    and company_context
+                    and contains_sensitive_probe(reply)
+                    and not contains_sensitive_probe(corrected_message)
+                ):
+                    try:
+                        safer, _ = await chat_with_brain(
+                            [
+                                *messages,
+                                Message(role="assistant", content=reply),
+                                Message(
+                                    role="system",
+                                    content=(
+                                        "That draft raises something private while someone "
+                                        "else is in the room with him. Say it again without "
+                                        "any of it — no romance, feelings about people, "
+                                        "health, or money. Reply to what he actually said, "
+                                        "warmly and briefly."
+                                    ),
+                                ),
+                            ],
+                            api_key=s.brain_api_key,
+                            base_url=s.brain_base_url,
+                            model=s.brain_model,
+                            max_tokens=s.chat_max_tokens_cloud,
+                        )
+                        if safer.strip() and not contains_sensitive_probe(safer):
+                            reply = safer
+                    except (httpx.RequestError, RuntimeError):
+                        pass  # never fail the turn over discretion; the draft stands
+
                 # Structural repetition guard: if the draft near-repeats a recent reply,
                 # regenerate once with the draft in view. He heard it the first time.
                 if not pending_tool_calls and _is_near_duplicate_reply(reply, recent_turns):
