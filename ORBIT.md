@@ -1295,6 +1295,44 @@ whether Ollama happens to be running.
 
 Verified: **162 pytest in a clean clone with no `.env` and no Ollama**, both corpora, CI green.
 
+### Phase 3.20 — DONE (2026-08-03): people, and the names ORBIT mishears them by
+
+**Corrections Ayush gave directly** (ORBIT was stating the first as current, which was wrong):
+his *first* co-op was IT Support at Dalhousie and is finished; he now holds **two on-campus
+part-time jobs** at Dalhousie (IT Help Desk, and captioning lecture recordings) alongside a
+co-op as **Student IT Analyst at HRM, extended to December 2026**. All corrected in
+`personal_knowledge` and re-seeded into semantic memory.
+
+**People.** New `people` table holding each person's known *heard variants*. His friend
+**Kavan** sat in the calendar as both "Kawan" and "Kan" — one person split into two
+strangers, with nothing in the system connecting them. Seeded with his six close friends
+(Kavan, Krish, Shreel, Manika, Shruti, Nishika — same course at Dalhousie; Krish and Kavan
+are his housemates).
+
+**Prompting was measured and was not enough.** Told plainly in the system prompt that
+"Kawan" IS "Kavan", the brain still answered *"your housemates are Krish and Kavan — Kawan
+is just a close friend"* and titled a reminder *"Call Nishka"*. So resolution is
+**structural**. That is safe to do locally because it is **not a guess**: only an exact,
+whole-word match against a curated variant list is rewritten — nothing fuzzy, so it cannot
+merge two real people, and a variant that is also someone else's real name is never touched.
+Correction happens once at the door, so the brain, the tool calls, semantic recall *and*
+stored history all carry the real name; a mishearing can no longer propagate into history.
+
+```
+"schedule a call with Kan on Thursday at 2 PM"
+    → create_calendar_event {"title": "Call with Kavan", "start": "2026-08-06T14:00:00"}
+"is Kawan my housemate?"   → "Yes, Kavan is one of your housemates, along with Krish."
+"remind me to call Nishka" → create_reminder {"title": "Call Nishika"}
+"who is Rajesh?"           → correctly unknown; asks instead of guessing
+```
+
+Alias generation rejects the junk a naive substitution makes (`"shreel"` → `"shhreel"`).
+The v↔w rule that caused the original bug is generated, not just observed.
+
+Verified: **176 pytest**, both corpora, CI green. **Still open:** the Swift side does its own
+name handling for contacts/calendar; misheard names typed into the panel path are not yet
+routed through this.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias
