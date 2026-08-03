@@ -716,6 +716,17 @@ enum OrbitMacControlCenter {
             let report = await OrbitSpeechInputController.requestPermissionsAndReport()
             return Outcome(handled: true, reply: report, appendWakeConversationPrompt: false)
         }
+        // Barge-in trace: whether the mic actually armed while ORBIT was speaking, and what
+        // it heard. Added because the first field test failed silently and reading the code
+        // could not separate "the mic never opened" from "it opened and heard only ORBIT".
+        if normalized.contains("barge") || normalized.contains("interrupt diagnostic")
+            || normalized.contains("interruption log") {
+            return Outcome(
+                handled: true,
+                reply: OrbitBargeIn.report(),
+                appendWakeConversationPrompt: false
+            )
+        }
         // Self-check: reports every permission gate ORBIT's system control depends on.
         if normalized.contains("diagnostic") || normalized.contains("diagnose")
             || normalized == "self check" || normalized == "check permissions" {

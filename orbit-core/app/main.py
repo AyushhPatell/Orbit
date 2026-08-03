@@ -431,6 +431,27 @@ def _lifecycle_phase(occurs_at: str, *, duration_minutes: int = 60, now=None) ->
     return "PAST (yesterday)" if days == 1 else f"PAST ({days} days ago)"
 
 
+_FINISHED_MARKERS = ("PAST", "JUST FINISHED", "FINISHED", "LIKELY DONE")
+
+
+def _is_finished_label(label: str) -> bool:
+    """Over and done — the material a follow-up ("how did it go?") is made of."""
+    return any(marker in label for marker in _FINISHED_MARKERS)
+
+
+def _is_from_a_previous_day(label: str) -> bool:
+    """True when an event belongs to a day that has already ended.
+
+    **This is the line that matters.** The 2026-08-03 failure was cross-day bleed: a
+    breakfast planned on Aug 2 was reported as "this morning" on Aug 3. Yesterday's events
+    are history and must not appear in today's context at all — labelling them PAST was not
+    enough, because the model read the summary and ignored the label.
+
+    Today's finished events stay: "you called Shreel earlier" is true and worth having.
+    """
+    return "PAST" in label
+
+
 def _temporal_label(event: dict, current_hour: int, *, now=None) -> str:
     """Label a life event relative to the clock that matters: the one ticking NOW.
 
@@ -1099,6 +1120,14 @@ def build_messages(
 
     # Personal knowledge: structured understanding of Ayush built over time
     core_profile = memory.get_core_profile(max_per_category=3)
+    routine_warning = (
+        "\n**Routines are patterns, not today's record.** A line like \"shift runs 8:30 AM to "
+        "4:30 PM on working days\" describes what he USUALLY does. It is not evidence that he "
+        "did it today, and you have no way of knowing whether he did. Never state or imply "
+        "that he worked, ate, went or attended anything today unless he said so in this "
+        "conversation or it appears in today's live context below. If he asks about his day "
+        "and you only have routines, say what you actually know and ask.\n"
+    )
     if core_profile:
         profile += "\n\n### What you know about Ayush (learned from conversations)\n"
         profile += "This is your deep understanding of who Ayush is. Use it naturally.\n"
@@ -1114,6 +1143,8 @@ def build_messages(
             "Use this knowledge to give better, more personal advice. "
             "Don't recite these facts back — just let them inform how you talk to him.\n"
         )
+        if "routines" in core_profile:
+            profile += routine_warning
     # Topic-relevant deep knowledge (semantic search within personal knowledge)
     if semantic_memory_enabled:
         topic_knowledge = memory.search_personal_knowledge(user_message, limit=3)
@@ -1236,8 +1267,24 @@ def build_messages(
             + "\nUse this as soft memory if relevant; do not force it if unrelated."
         )
     # Episodic memory: recent life events, plans, feelings the user shared
-    life_events = memory.recent_life_events(limit=8, days=3)
+    all_recent_events = memory.recent_life_events(limit=12, days=3)
     current_hour = _current_hour(client_local_iso)
+
+    # Only what is LIVE goes into ambient context. Finished events are follow-up material,
+    # not part of "what's going on right now".
+    #
+    # This was labelling, and labelling was not enough. On 2026-08-03 ORBIT said "you
+    # planned a quick breakfast this morning" about an event it had been handed as
+    # `PAST (yesterday)` — the label was correct and the model ignored it. Prompting is not
+    # enforcement: a finished event that is never injected cannot be spoken of as current.
+    live_events, finished_events = [], []
+    for event in all_recent_events:
+        label = _temporal_label(event, current_hour)
+        if _is_finished_label(label):
+            finished_events.append(event)
+        if not _is_from_a_previous_day(label):
+            live_events.append(event)
+    life_events = live_events[:8]
     if life_events:
         profile = (
             profile
@@ -1266,8 +1313,8 @@ def build_messages(
             "that is an ANSWER, not a conversation end. Acknowledge naturally and let him lead.\n"
             "- These are CONTEXT, not content: never recite, list, or summarize them back to him "
             "unless he explicitly asks what's going on or what you remember.\n"
-            "- Anything labeled LIKELY DONE or PAST has probably already happened — never speak "
-            "of it as current or still planned.\n"
+            "- **Everything here is live right now.** Finished events are deliberately not shown "
+            "to you, so if something isn't in this list, do not claim it happened today.\n"
         )
 
     # Emotional state: inject mood trend so ORBIT adjusts its tone
@@ -1324,7 +1371,9 @@ def build_messages(
     # means answer it — the model never even sees something to recite.
     # Company suppresses volunteering entirely — his life is not for an audience he did not
     # choose. The governor already gates on openers; this is the second gate.
-    nudge_candidates = [] if company_context else _get_nudge_candidates(life_events, current_hour)
+    # Finished events are exactly what a follow-up is made of — they reach the model only
+    # here, where volunteering is already gated on an opener.
+    nudge_candidates = [] if company_context else _get_nudge_candidates(finished_events, current_hour)
     if nudge_candidates and _is_conversational_opener(user_message):
         profile += "\n\n### Proactive care (optional — use ONLY if it fits naturally)\n"
         profile += (

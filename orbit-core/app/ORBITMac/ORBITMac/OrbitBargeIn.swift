@@ -24,6 +24,37 @@ enum OrbitBargeIn {
         UserDefaults.standard.bool(forKey: "orbitMac.allowBargeIn")
     }
 
+    // MARK: - Diagnostics
+    //
+    // The first field test failed completely — saying "stop" over and over did nothing — and
+    // there were two equally plausible causes: the mic never opened, or it opened and heard
+    // only ORBIT. Reading the code cannot separate those. This records what actually
+    // happened so the next test produces facts instead of another theory.
+
+    private static let logKey = "orbitMac.bargeInLog"
+
+    static func log(_ line: String) {
+        var entries = UserDefaults.standard.stringArray(forKey: logKey) ?? []
+        let stamp = ISO8601DateFormatter().string(from: Date()).suffix(8)
+        entries.append("\(stamp) \(line)")
+        if entries.count > 40 { entries.removeFirst(entries.count - 40) }
+        UserDefaults.standard.set(entries, forKey: logKey)
+        print("[ORBIT-BARGEIN] \(line)")
+    }
+
+    static func report() -> String {
+        let entries = UserDefaults.standard.stringArray(forKey: logKey) ?? []
+        guard !entries.isEmpty else {
+            return "Barge-in: nothing recorded yet. Turn the toggle on, say something while "
+                 + "I'm talking, then ask for barge-in diagnostics."
+        }
+        return "Barge-in log (newest last):\n" + entries.suffix(20).joined(separator: "\n")
+    }
+
+    static func clearLog() {
+        UserDefaults.standard.removeObject(forKey: logKey)
+    }
+
     static func normalized(_ text: String) -> String {
         text.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)

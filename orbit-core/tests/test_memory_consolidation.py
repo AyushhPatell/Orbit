@@ -168,3 +168,29 @@ def test_corrupt_timestamp_does_not_block_the_pass(isolate_memory_store) -> None
     store = isolate_memory_store
     store.set_meta("consolidation.last_run", "not-a-date")
     assert is_due(store, now=NOW)
+
+
+def test_dated_events_without_a_clock_time_expire_by_day() -> None:
+    """THE bug from 2026-08-03: "Planning to have a quick breakfast" was said on Aug 2 with
+    event_date="today". Nothing expired it, so it sat in the live window and ORBIT spoke of
+    it as *this morning* the next day."""
+    yesterday = (NOW - timedelta(days=1)).strftime(FMT)
+    events = [
+        {"id": 1, "summary": "Planning a quick breakfast", "event_date": "today",
+         "created_at": yesterday, "occurs_at": None, "importance": 0.4},
+        {"id": 2, "summary": "Something said today", "event_date": "today",
+         "created_at": NOW.strftime(FMT), "occurs_at": None, "importance": 0.4},
+        {"id": 3, "summary": "Plans for tomorrow", "event_date": "tomorrow",
+         "created_at": NOW.strftime(FMT), "occurs_at": None, "importance": 0.4},
+        {"id": 4, "summary": "Undated thought", "event_date": None,
+         "created_at": yesterday, "occurs_at": None, "importance": 0.4},
+    ]
+    expired = {e["id"] for e in find_expired(events, now=NOW)}
+    assert expired == {1}, expired
+
+
+def test_a_tomorrow_event_expires_the_day_after() -> None:
+    said = (NOW - timedelta(days=2)).strftime(FMT)
+    event = {"id": 9, "summary": "Dentist", "event_date": "tomorrow",
+             "created_at": said, "occurs_at": None, "importance": 0.5}
+    assert find_expired([event], now=NOW)

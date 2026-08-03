@@ -126,16 +126,42 @@ def find_expired(events: list[dict], *, now: Optional[datetime] = None) -> list[
     expired = []
     for ev in events:
         occurs_at = ev.get("occurs_at")
-        if not occurs_at:
+        if occurs_at:
+            try:
+                start = datetime.strptime(occurs_at, "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                continue
+            end = start + timedelta(minutes=int(ev.get("duration_minutes") or 60))
+            if current - end > timedelta(hours=EXPIRE_AFTER_HOURS):
+                expired.append(ev)
             continue
-        try:
-            start = datetime.strptime(occurs_at, "%Y-%m-%d %H:%M:%S")
-        except (ValueError, TypeError):
-            continue
-        end = start + timedelta(minutes=int(ev.get("duration_minutes") or 60))
-        if current - end > timedelta(hours=EXPIRE_AFTER_HOURS):
+
+        # No clock time, but a day word still has a day. "Planning a quick breakfast"
+        # said yesterday with event_date="today" meant *yesterday* — and because nothing
+        # expired it, it sat in the live window and was spoken of as this morning.
+        day = _event_day(ev)
+        if day is not None and (current.date() - day).days >= 1:
             expired.append(ev)
     return expired
+
+
+def _event_day(event: dict):
+    """The calendar day a dated-but-timeless event belonged to, or None if it has no day."""
+    event_date = event.get("event_date") or ""
+    if event_date not in ("today", "tonight", "today-evening", "tomorrow", "weekend", "next-week"):
+        return None
+    try:
+        created = datetime.strptime(str(event.get("created_at")), "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    if event_date in ("today", "tonight", "today-evening"):
+        return created.date()
+    if event_date == "tomorrow":
+        return created.date() + timedelta(days=1)
+    if event_date == "weekend":
+        start = created.date() + timedelta(days=(5 - created.weekday()) % 7)
+        return start + timedelta(days=1)
+    return created.date() + timedelta(days=7 - created.weekday() + 6)
 
 
 def consolidate(store: Any, *, now: Optional[datetime] = None) -> dict:

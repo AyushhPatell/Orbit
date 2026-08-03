@@ -133,6 +133,10 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         )
 
         let node = audioEngine.inputNode
+        // The SpeechAnalyzer path returns before the legacy setup below, so echo
+        // cancellation has to be applied here too. It wasn't — and since this engine is the
+        // default, barge-in was running with no cancellation at all on Ayush's machine.
+        applyEchoCancellationIfEnabled(on: node)
         node.removeTap(onBus: 0)
         let format = node.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -259,7 +263,9 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         guard node.isVoiceProcessingEnabled != wanted else { return }
         do {
             try node.setVoiceProcessingEnabled(wanted)
+            OrbitBargeIn.log("voice processing \(wanted ? "enabled" : "disabled")")
         } catch {
+            OrbitBargeIn.log("voice processing FAILED: \(error.localizedDescription)")
             // Not fatal — barge-in simply won't work well on this device. Recorded rather
             // than swallowed, because a silent failure here looks like "it just doesn't work".
             lastError = "Voice processing unavailable: \(error.localizedDescription)"
@@ -273,20 +279,42 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
     /// the only outcome is "he started talking" — the real listening session takes over.
     func startBargeInListening(spokenText: @escaping () -> String,
                                onInterrupt: @escaping (String) -> Void) async {
-        guard OrbitBargeIn.isEnabled, !isListening else { return }
-        guard (try? await requestAuthorization()) != nil else { return }
+        guard OrbitBargeIn.isEnabled else { return }
+        guard !isListening else {
+            OrbitBargeIn.log("NOT ARMED — mic already in use")
+            return
+        }
+        do {
+            try await requestAuthorization()
+        } catch {
+            OrbitBargeIn.log("NOT ARMED — permission: \(error.localizedDescription)")
+            return
+        }
         var fired = false
-        try? await startListening(
-            onPartial: { [weak self] text in
-                guard !fired, self != nil else { return }
-                guard OrbitBargeIn.shouldInterrupt(transcript: text, spokenText: spokenText())
-                else { return }
-                fired = true
-                onInterrupt(text)
-            },
-            onCommit: { _ in },
-            silenceAfterSeconds: 2.4
-        )
+        do {
+            try await startListening(
+                onPartial: { [weak self] text in
+                    guard !fired, self != nil else { return }
+                    let said = spokenText()
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    if OrbitBargeIn.shouldInterrupt(transcript: trimmed, spokenText: said) {
+                        fired = true
+                        OrbitBargeIn.log("INTERRUPT ← heard \"\(trimmed)\"")
+                        onInterrupt(trimmed)
+                    } else {
+                        OrbitBargeIn.log("ignored \"\(trimmed)\" (echo/filler/too short)")
+                    }
+                },
+                onCommit: { _ in },
+                silenceAfterSeconds: 2.4
+            )
+            let engineName = usingModernEngine ? "SpeechAnalyzer" : "SFSpeech"
+            let aec = audioEngine.inputNode.isVoiceProcessingEnabled ? "AEC on" : "AEC OFF"
+            OrbitBargeIn.log("armed — \(engineName), \(aec)")
+        } catch {
+            OrbitBargeIn.log("NOT ARMED — \(error.localizedDescription)")
+        }
     }
 
     private func scheduleSilenceCommit() {
