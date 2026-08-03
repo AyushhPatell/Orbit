@@ -1621,6 +1621,47 @@ every transcript with the reason it was accepted or rejected. Say **"barge-in di
 
 Verified: **210 pytest**, six corpora, clean xcodebuild, CI green. **Xcode rebuild required.**
 
+### Phase 3.29 — DONE (2026-08-03): restoring voice input — barge-in broke it two ways
+
+Ayush rebuilt, woke ORBIT, and it heard **nothing** for the rest of the session. The mic light
+was on; every word was discarded. **Both causes were mine, from Phase 3.27.**
+
+**1. Voice processing killed the audio path.** His console, repeating continuously:
+
+```
+vp::vx::Voice_Processor … failed to process downlink voice proc …
+    "audio time stamp does not have valid sample time"
+vp::vx::Voice_Processor_Interface_Adapter … failed to run downlink DSP (I/O fault)
+```
+
+**VPIO is a duplex unit** — it cancels echo by comparing the mic against the audio *the same
+engine plays*. This engine only **captures**; it has no output. So the downlink has no valid
+timestamps, the DSP faults on every buffer, and the capture path dies with it. TTS also plays
+through `AVSpeechSynthesizer` on a **separate** path, so it was never a reference signal VPIO
+could have used anyway. **Input-only engines cannot use VPIO — a design constraint, not a
+tuning problem.** The flag lives on the node, so one enable poisoned the engine for the whole
+app lifetime; it is now force-disabled on every start, which repairs an already-poisoned app.
+
+*The detail that confirmed the diagnosis:* the **wake word still worked**. It owns a separate
+`AVAudioEngine` that was never touched — exactly matching "he woke up, and after that he
+listened to nothing."
+
+**2. The barge-in listener stranded the microphone.** It held the mic, and its commit handler
+**discards everything by design** (mid-speech audio is echo-prone). It never released — so the
+real listening session could never start, because that guards on `!isListening`. That second
+bug alone explains *"the orange icon was there, but he listened to nothing."* The mic is now
+handed back the moment ORBIT stops speaking, with a 90-second ceiling.
+
+**What this means for barge-in.** Hardware echo cancellation is off the table on this
+architecture. Rejection is now **entirely content-based** — comparing what the mic hears
+against what ORBIT is saying — which is weaker than AEC and is the honest ceiling of this
+approach. The toggle stays **default off**.
+
+**Lesson recorded: a feature that touches the shared audio path can break everything, and
+"behind a toggle" did not contain it** — because the poisoned flag persisted on the node
+beyond the toggle's own scope. Anything touching capture must be verified with the mic
+actually running before it ships, not only by a corpus and a clean build.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias
