@@ -74,6 +74,36 @@ final class OrbitWakeVoiceBackstage {
 
     /// Called by OrbitProactiveNotifier after speaking a followup question.
     /// Opens interactive mic WITHOUT clearing the wake card (which shows the question).
+    /// Keeps the mic open while ORBIT is speaking so Ayush can cut in — a companion you have
+    /// to wait out is not one. Off unless `orbitMac.allowBargeIn` is set.
+    ///
+    /// On a real interruption: stop talking immediately, cancel the queued voice-loop
+    /// fallback, and open a normal listening session so what he says next is heard properly.
+    /// The interrupting words themselves are NOT used as the message — mid-speech audio is
+    /// echo-prone, and acting on a half-heard phrase is how ORBIT would do the wrong thing
+    /// confidently.
+    @MainActor
+    func listenForBargeIn() async {
+        guard OrbitBargeIn.isEnabled else { return }
+        let speech = OrbitVoiceKit.shared.speech
+        let speechInput = OrbitVoiceKit.shared.speechInput
+        guard !speechInput.isListening else { return }
+        await speechInput.startBargeInListening(
+            spokenText: { speech.lastSpokenText ?? "" },
+            onInterrupt: { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    speech.stop()
+                    self.voiceLoopFallbackTask?.cancel()
+                    self.voiceLoopFallbackTask = nil
+                    speechInput.stopListening()
+                    OrbitListeningPresence.shared.clearWakeVoiceCard()
+                    await self.startVoiceInputSession()
+                }
+            }
+        )
+    }
+
     func startListeningForFollowupResponse() async {
         let speechInput = OrbitVoiceKit.shared.speechInput
         switch OrbitVoiceSession.shared.state {
@@ -1276,6 +1306,7 @@ final class OrbitWakeVoiceBackstage {
                         scheduleVoiceLoopFallback(for: cleanedReply)
                     }
                     speech.speak(cleanedReply)
+                    await listenForBargeIn()
                 }
             } else if willResume {
                 await startVoiceInputSession()

@@ -74,6 +74,7 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         request = req
 
         let node = audioEngine.inputNode
+        applyEchoCancellationIfEnabled(on: node)
         node.removeTap(onBus: 0)
         let format = node.outputFormat(forBus: 0)
         // A zero sample-rate/channel format means the mic isn't actually available (permission
@@ -244,6 +245,48 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
 
         // Keep the silence commit ticking — fires if the user has genuinely stopped
         scheduleSilenceCommit()
+    }
+
+    /// Turns on macOS voice processing (echo cancellation) so the mic can stay open while
+    /// ORBIT is speaking, without hearing itself.
+    ///
+    /// Applied ONLY to this controller's engine. `OrbitWakeWordController` owns a separate
+    /// `AVAudioEngine`, so the wake path — a month of tuning — is untouched either way.
+    /// Behind `orbitMac.allowBargeIn`, default off: if it degrades anything, one toggle
+    /// returns to the previous behaviour with no rebuild.
+    private func applyEchoCancellationIfEnabled(on node: AVAudioInputNode) {
+        let wanted = OrbitBargeIn.isEnabled
+        guard node.isVoiceProcessingEnabled != wanted else { return }
+        do {
+            try node.setVoiceProcessingEnabled(wanted)
+        } catch {
+            // Not fatal — barge-in simply won't work well on this device. Recorded rather
+            // than swallowed, because a silent failure here looks like "it just doesn't work".
+            lastError = "Voice processing unavailable: \(error.localizedDescription)"
+        }
+    }
+
+    /// Opens the mic while ORBIT is speaking, so he can be interrupted.
+    ///
+    /// The commit path is deliberately not reused: mid-speech audio is noisy and echo-prone,
+    /// so nothing is committed as a message here. Partials are judged by `OrbitBargeIn`, and
+    /// the only outcome is "he started talking" — the real listening session takes over.
+    func startBargeInListening(spokenText: @escaping () -> String,
+                               onInterrupt: @escaping (String) -> Void) async {
+        guard OrbitBargeIn.isEnabled, !isListening else { return }
+        guard (try? await requestAuthorization()) != nil else { return }
+        var fired = false
+        try? await startListening(
+            onPartial: { [weak self] text in
+                guard !fired, self != nil else { return }
+                guard OrbitBargeIn.shouldInterrupt(transcript: text, spokenText: spokenText())
+                else { return }
+                fired = true
+                onInterrupt(text)
+            },
+            onCommit: { _ in },
+            silenceAfterSeconds: 2.4
+        )
     }
 
     private func scheduleSilenceCommit() {

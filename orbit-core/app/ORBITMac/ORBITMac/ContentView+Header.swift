@@ -21,6 +21,7 @@ extension ContentView {
                     Toggle("After Hey ORBIT, open mic", isOn: $wakeWordAutoListen)
                     Toggle("Listen in Low Power Mode", isOn: $listenInLowPowerMode)
                     Toggle("New speech engine (en-IN accent model)", isOn: $useModernSpeech)
+                    Toggle("Let me interrupt ORBIT while he's speaking", isOn: $allowBargeIn)
                 }
                 Section("Proactive") {
                     Toggle("Event & reminder alerts", isOn: $proactiveNotifications)

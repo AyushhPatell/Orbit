@@ -843,10 +843,112 @@ _SENSITIVE_PROBE_PATTERNS = (
 )
 
 
+def _sensitive_sentence(text: str) -> str:
+    """The single sentence that carried the private question — parking the whole reply would
+    store pleasantries alongside it."""
+    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+        if contains_sensitive_probe(sentence):
+            return sentence.strip()
+    return (text or "").strip()
+
+
 def contains_sensitive_probe(text: str) -> bool:
     """True when a reply raises something intimate — the class of thing that is fine alone
     and mortifying in front of friends."""
     return any(re.search(p, text or "", re.IGNORECASE) for p in _SENSITIVE_PROBE_PATTERNS)
+
+
+_CURIOSITY_KEY = "curiosity.pending"
+
+_SOLITUDE_PATTERNS = (
+    r"\bi'?m\s+alone\b", r"\bi\s+am\s+alone\b",
+    r"\bno\s?body(?:'s| is)?\s+(?:here|around|listening)\b",
+    r"\bno\s+one(?:'s| is)?\s+(?:here|around|listening)\b",
+    r"\bjust\s+me\b", r"\bonly\s+me\b",
+    r"\b(?:we'?re|we\s+are)\s+alone\b",
+    r"\bthey(?:'re| are)?\s+gone\b",
+    r"\b(?:he|she)(?:'s| is)?\s+(?:gone|left)\b",
+    r"\bon\s+my\s+own\s+now\b",
+    r"\bcan\s+talk\s+(?:freely|now)\b",
+)
+
+_INVITATION_PATTERNS = (
+    r"\bwhat\s+(?:did|do)\s+you\s+want\s+to\s+ask\b",
+    r"\byou\s+can\s+ask\s+(?:me\s+)?(?:now|that|it)\b",
+    r"\bask\s+me\s+(?:that|it|now|the\s+thing)\b",
+    r"\bwhat\s+were\s+you\s+going\s+to\s+(?:ask|say)\b",
+    r"\bgo\s+ahead\s+and\s+ask\b",
+    r"\byou\s+wanted\s+to\s+ask\s+(?:me\s+)?something\b",
+    r"\bwhat'?s\s+(?:on\s+your\s+mind|that\s+thing)\b",
+)
+
+
+def detect_solitude(text: str) -> bool:
+    """He's telling ORBIT the room is clear."""
+    return any(re.search(p, text or "", re.IGNORECASE) for p in _SOLITUDE_PATTERNS)
+
+
+def detect_invitation_to_ask(text: str) -> bool:
+    """"What did you want to ask me?" — he's opening the door himself."""
+    return any(re.search(p, text or "", re.IGNORECASE) for p in _INVITATION_PATTERNS)
+
+
+def park_curiosity(store, question: str, *, now=None) -> None:
+    """Hold a question ORBIT wanted to ask but couldn't, because someone was listening.
+
+    The discretion guard used to simply delete the question. That protected his privacy and
+    threw away the one thing that makes ORBIT feel like it has a mind of its own — that it
+    actually wanted to know. Deferring it keeps both.
+    """
+    from datetime import datetime
+
+    cleaned = (question or "").strip()
+    if not cleaned:
+        return
+    store.set_meta(_CURIOSITY_KEY, json.dumps({
+        "question": cleaned[:400],
+        "at": (now or datetime.utcnow()).strftime("%Y-%m-%d %H:%M:%S"),
+    }))
+
+
+def pending_curiosity_note(raw_state: str, *, invited: bool = False, now=None) -> Optional[str]:
+    """Surface a parked question once the room is clear.
+
+    Expires after three days: a question worth asking is worth asking soon, and one that has
+    been sitting for a week has become a thing ORBIT keeps bringing up rather than curiosity.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        state = json.loads(raw_state)
+        question = str(state["question"]).strip()
+        parked = datetime.strptime(state["at"], "%Y-%m-%d %H:%M:%S")
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return None
+    if not question:
+        return None
+    current = now or datetime.utcnow()
+    if current - parked > timedelta(days=3):
+        return None
+
+    note = (
+        "\n\n### Something you wanted to ask him\n"
+        f"Earlier, with someone else in the room, you held this back:\n\n> {question}\n\n"
+    )
+    if invited:
+        note += (
+            "**He has just invited you to ask it.** Go ahead — in your own words rather than "
+            "read back verbatim, but ask what you actually wanted to know. Don't soften it "
+            "into a different, safer question; he opened the door on purpose.\n"
+        )
+    else:
+        note += (
+            "He appears to be alone now. If the conversation gives you an opening, you can "
+            "ask — but only if it still genuinely fits. A question forced into an unrelated "
+            "moment is worse than one never asked. If it doesn't fit, let it go.\n"
+        )
+    note += "Ask it once. Whatever he answers, don't raise it again.\n"
+    return note
 
 
 CURIOSITY_BLOCK = (
@@ -862,6 +964,11 @@ CURIOSITY_BLOCK = (
     "and don't return to it later.\n"
     "- Anything intimate — who he likes, how he feels about someone, romance, health, money — "
     "only ever when you two are alone, and only if the conversation genuinely arrives there.\n"
+    "- **You can check first.** If you want to raise something private and you're not sure "
+    "whether anyone's around, just ask lightly — \"are you on your own?\" — and wait for his "
+    "answer. If someone is there, drop it gracefully and move the conversation along without "
+    "making it strange for anyone; you can come back to it another time.\n"
+    "- You don't only follow his lead. If you want to know something, it is yours to raise.\n"
 )
 
 
@@ -1279,6 +1386,12 @@ def build_messages(
     else:
         # Alone: ORBIT may follow his own curiosity. Permission, never obligation.
         profile += CURIOSITY_BLOCK
+        parked = pending_curiosity_note(
+            memory.get_meta(_CURIOSITY_KEY, ""),
+            invited=detect_invitation_to_ask(user_message),
+        )
+        if parked:
+            profile += parked
 
     if is_briefing_request(user_message):
         delta = briefing_delta_note(memory.get_meta(_BRIEFING_KEY, ""), life_events)
@@ -1833,7 +1946,9 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             memory.set_meta(_AWAY_KEY, "")
 
     # Company: someone else in the room changes what ORBIT should volunteer.
-    if detect_company_left(corrected_message):
+    # "I'm alone now" clears it as surely as "she left" — he is answering the question
+    # ORBIT is allowed to ask before raising anything private.
+    if detect_company_left(corrected_message) or detect_solitude(corrected_message):
         memory.set_meta(_COMPANY_KEY, "")
     elif (arrival := detect_company(corrected_message, memory.all_people())) and payload.save_memory:
         from datetime import datetime as _dt
@@ -1948,6 +2063,11 @@ async def chat(payload: ChatRequest) -> ChatResponse:
                             max_tokens=s.chat_max_tokens_cloud,
                         )
                         if safer.strip() and not contains_sensitive_probe(safer):
+                            # Hold the question rather than destroying it — he can be asked
+                            # once the room is clear. Discretion shouldn't cost ORBIT its
+                            # curiosity, only its timing.
+                            if payload.save_memory:
+                                park_curiosity(memory, _sensitive_sentence(reply))
                             reply = safer
                     except (httpx.RequestError, RuntimeError):
                         pass  # never fail the turn over discretion; the draft stands
@@ -2155,6 +2275,11 @@ async def chat(payload: ChatRequest) -> ChatResponse:
                 "at": _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "covered": covered,
             }))
+
+    # A parked question is asked once. If ORBIT raised it in this reply, retire it — a
+    # companion that keeps circling back to the same question is not curious, it's stuck.
+    if payload.save_memory and memory.get_meta(_CURIOSITY_KEY, "") and reply.rstrip().endswith("?"):
+        memory.set_meta(_CURIOSITY_KEY, "")
 
     departure = detect_departure(payload.message)
     if departure and payload.save_memory:

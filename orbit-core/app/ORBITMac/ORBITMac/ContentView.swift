@@ -18,6 +18,7 @@ struct ContentView: View {
     @AppStorage("orbitMac.wakeWordAutoListen") var wakeWordAutoListen = true
     @AppStorage("orbitMac.listenInLowPowerMode") var listenInLowPowerMode = false
     @AppStorage("orbitMac.useModernSpeech") var useModernSpeech = true
+    @AppStorage("orbitMac.allowBargeIn") var allowBargeIn = false
     @AppStorage("orbitMac.showWakeDiagnostics") var showWakeDiagnostics = false
     @AppStorage("orbitMac.proactiveNotifications") var proactiveNotifications = true
     @AppStorage("orbitMac.proactiveVoiceAnnounce") var proactiveVoiceAnnounce = false
