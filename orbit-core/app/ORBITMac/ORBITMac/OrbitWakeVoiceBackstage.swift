@@ -18,6 +18,8 @@ final class OrbitWakeVoiceBackstage {
     private var calendarSummary = ""
     private var calendarPlaceholder = true
     private var voiceLoopFallbackTask: Task<Void, Never>?
+    /// Hands the microphone back when ORBIT stops speaking, so barge-in can never strand it.
+    private var bargeInReleaseTask: Task<Void, Never>?
     private var wakeObserver: NSObjectProtocol?
 
     private init() {}
@@ -88,9 +90,12 @@ final class OrbitWakeVoiceBackstage {
         let speech = OrbitVoiceKit.shared.speech
         let speechInput = OrbitVoiceKit.shared.speechInput
         guard !speechInput.isListening else { return }
+
+        var interrupted = false
         await speechInput.startBargeInListening(
             spokenText: { speech.lastSpokenText ?? "" },
             onInterrupt: { [weak self] _ in
+                interrupted = true
                 Task { @MainActor in
                     guard let self else { return }
                     speech.stop()
@@ -102,6 +107,26 @@ final class OrbitWakeVoiceBackstage {
                 }
             }
         )
+        guard speechInput.isListening else { return }
+
+        // **The mic MUST be handed back when ORBIT stops talking.**
+        //
+        // Without this, the barge-in listener kept the microphone for the rest of the
+        // session — and its commit handler deliberately discards everything, because
+        // mid-speech audio is echo-prone. So the mic light stayed on while every word was
+        // thrown away, and the real listening session could never start: it guards on
+        // `!isListening`, which was permanently true. That is exactly what Ayush saw —
+        // "the orange icon was there, but he listened to nothing."
+        bargeInReleaseTask?.cancel()
+        bargeInReleaseTask = Task { @MainActor in
+            let deadline = Date().addingTimeInterval(90)
+            while speech.isSpeaking, Date() < deadline, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+            guard !Task.isCancelled, !interrupted else { return }
+            if speechInput.isListening { speechInput.stopListening() }
+            OrbitBargeIn.log("released — ORBIT finished speaking")
+        }
     }
 
     func startListeningForFollowupResponse() async {

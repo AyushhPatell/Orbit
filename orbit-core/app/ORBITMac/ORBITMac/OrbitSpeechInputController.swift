@@ -74,7 +74,7 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         request = req
 
         let node = audioEngine.inputNode
-        applyEchoCancellationIfEnabled(on: node)
+        ensureVoiceProcessingDisabled(on: node)
         node.removeTap(onBus: 0)
         let format = node.outputFormat(forBus: 0)
         // A zero sample-rate/channel format means the mic isn't actually available (permission
@@ -133,10 +133,9 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         )
 
         let node = audioEngine.inputNode
-        // The SpeechAnalyzer path returns before the legacy setup below, so echo
-        // cancellation has to be applied here too. It wasn't — and since this engine is the
-        // default, barge-in was running with no cancellation at all on Ayush's machine.
-        applyEchoCancellationIfEnabled(on: node)
+        // Both engine paths must clear voice processing — the SpeechAnalyzer path returns
+        // before the legacy setup below, so a repair placed only there would never run.
+        ensureVoiceProcessingDisabled(on: node)
         node.removeTap(onBus: 0)
         let format = node.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -258,17 +257,35 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
     /// `AVAudioEngine`, so the wake path — a month of tuning — is untouched either way.
     /// Behind `orbitMac.allowBargeIn`, default off: if it degrades anything, one toggle
     /// returns to the previous behaviour with no rebuild.
-    private func applyEchoCancellationIfEnabled(on node: AVAudioInputNode) {
-        let wanted = OrbitBargeIn.isEnabled
-        guard node.isVoiceProcessingEnabled != wanted else { return }
+    /// Guarantees macOS voice processing is OFF on this engine, and repairs it if a previous
+    /// build left it on.
+    ///
+    /// **This is a rollback, and the reason is recorded so it is never tried this way again.**
+    /// Enabling `setVoiceProcessingEnabled(true)` for barge-in (Phase 3.27) broke audio input
+    /// completely — the mic opened, the orange indicator appeared, and nothing was ever heard.
+    /// The console said exactly why, repeating continuously:
+    ///
+    ///     vp::vx::Voice_Processor … failed to process downlink voice proc …
+    ///     "audio time stamp does not have valid sample time"
+    ///     vp::vx::Voice_Processor_Interface_Adapter … failed to run downlink DSP (I/O fault)
+    ///
+    /// The Voice Processing I/O unit is a **duplex** unit: it cancels echo by comparing the
+    /// mic against the *downlink* — the audio the same engine is playing. This engine only
+    /// ever captures; it has no output. So the downlink has no valid timestamps, the DSP
+    /// faults every buffer, and the capture path dies with it. TTS also plays through
+    /// AVSpeechSynthesizer on a separate path, so it was never a reference signal VPIO could
+    /// have used anyway. Input-only engines cannot use VPIO — that is a design constraint,
+    /// not a tuning problem.
+    ///
+    /// The flag lives on the node, so a single enable persisted for the whole app lifetime;
+    /// clearing it here recovers an app that was already poisoned.
+    private func ensureVoiceProcessingDisabled(on node: AVAudioInputNode) {
+        guard node.isVoiceProcessingEnabled else { return }
         do {
-            try node.setVoiceProcessingEnabled(wanted)
-            OrbitBargeIn.log("voice processing \(wanted ? "enabled" : "disabled")")
+            try node.setVoiceProcessingEnabled(false)
+            OrbitBargeIn.log("voice processing force-disabled (recovering audio input)")
         } catch {
-            OrbitBargeIn.log("voice processing FAILED: \(error.localizedDescription)")
-            // Not fatal — barge-in simply won't work well on this device. Recorded rather
-            // than swallowed, because a silent failure here looks like "it just doesn't work".
-            lastError = "Voice processing unavailable: \(error.localizedDescription)"
+            OrbitBargeIn.log("could not disable voice processing: \(error.localizedDescription)")
         }
     }
 
@@ -310,8 +327,7 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
                 silenceAfterSeconds: 2.4
             )
             let engineName = usingModernEngine ? "SpeechAnalyzer" : "SFSpeech"
-            let aec = audioEngine.inputNode.isVoiceProcessingEnabled ? "AEC on" : "AEC OFF"
-            OrbitBargeIn.log("armed — \(engineName), \(aec)")
+            OrbitBargeIn.log("armed — \(engineName), content-based echo rejection")
         } catch {
             OrbitBargeIn.log("NOT ARMED — \(error.localizedDescription)")
         }

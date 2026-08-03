@@ -4,14 +4,19 @@
 //
 //  Deciding whether the microphone just heard Ayush — or ORBIT's own voice coming back.
 //
-//  Barge-in means listening WHILE speaking, which means the mic hears the speaker. macOS
-//  echo cancellation (`setVoiceProcessingEnabled`) removes most of that, but "most" is not a
-//  guarantee: leakage varies with volume, room, and whether he's on speakers or headphones.
-//  If ORBIT interrupts itself mid-sentence the feature is worse than not having it.
+//  Barge-in means listening WHILE speaking, which means the mic hears the speaker.
 //
-//  So AEC is the first line and **content** is the second: whatever the mic returns is
-//  compared against what ORBIT is currently saying, and a match is discarded. Hardware
-//  cancellation can fail quietly; this cannot — the words either match or they don't.
+//  **Hardware echo cancellation is not available here, and that is settled.** The first
+//  attempt (Phase 3.27) enabled macOS voice processing on the capture engine and broke audio
+//  input completely — see `ensureVoiceProcessingDisabled` for the console evidence. VPIO is a
+//  duplex unit that cancels against the audio the *same engine plays*; this engine only
+//  captures, and TTS goes out through AVSpeechSynthesizer on a separate path, so there was
+//  never a reference signal for it to use. Input-only engines cannot use VPIO.
+//
+//  So echo rejection is **entirely content-based**: whatever the mic returns is compared
+//  against what ORBIT is currently saying, and a match is discarded. That is weaker than
+//  hardware cancellation and it is the honest ceiling of this approach — which is why the
+//  whole feature stays behind a default-off toggle until it proves itself in real use.
 //
 //  Pure functions, so the corpus can prove the rules without an audio device.
 //
