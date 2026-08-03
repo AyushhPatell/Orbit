@@ -254,9 +254,15 @@ enum OrbitVoiceIntentHelpers {
             .replacingOccurrences(of: "\u{2019}", with: "'")
             .replacingOccurrences(of: "\u{02BC}", with: "'")
             .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "[^a-z0-9\\s']", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            // Trim LAST. Trimming first left punctuation to be replaced by a space afterwards,
+            // so "Sleep." normalised to "sleep " — with a trailing space — and every pattern
+            // anchored with `$` silently missed. That is exactly how "sleep" started opening
+            // Safari again after Phase 3.9 had supposedly fixed it: the corpus tests the bare
+            // word, but macOS 26's SpeechAnalyzer PUNCTUATES what it hears, so the live
+            // transcript was "Sleep." and no test ever saw it.
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Returns true when the user is asking ORBIT to look at/read the screen.

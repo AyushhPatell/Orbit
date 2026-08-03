@@ -175,11 +175,64 @@ enum WakeCorpus {
             }
         }
 
+        // ── PUNCTUATION: macOS 26's SpeechAnalyzer punctuates what it hears ──────────
+        //
+        // This whole section exists because of a live failure on 2026-08-03: Ayush said
+        // "sleep" and ORBIT opened Safari — the exact bug Phase 3.9 had already fixed. The
+        // corpus tested the bare word and passed; the real transcript was "Sleep." and
+        // `normalize` trimmed whitespace BEFORE turning punctuation into spaces, leaving
+        // "sleep " with a trailing space so every `$`-anchored pattern missed.
+        //
+        // Every phrase-matched behaviour is now re-run with the punctuation a real
+        // recogniser actually produces. A corpus that only sees clean text is testing an
+        // input the app never receives.
+        var punctuated = 0
+        func withPunctuation(_ phrase: String) -> [String] {
+            [phrase + ".", phrase + "!", phrase + "?", phrase + ","]
+        }
+        for phrase in restIntents {
+            for variant in withPunctuation(phrase) {
+                punctuated += 1
+                if !OrbitVoiceIntentHelpers.isRestIntent(variant) {
+                    failures.append("rest intent lost to punctuation → \"\(variant)\"")
+                }
+                if !OrbitVoiceIntentHelpers.isSessionStopCommand(variant) {
+                    failures.append("punctuated rest intent misses the stop path → \"\(variant)\"")
+                }
+            }
+        }
+        for phrase in notRestIntents {
+            for variant in withPunctuation(phrase) {
+                punctuated += 1
+                if OrbitVoiceIntentHelpers.isRestIntent(variant) {
+                    failures.append("punctuated sleep COMMAND hijacked → \"\(variant)\"")
+                }
+            }
+        }
+        for phrase in ["go away", "leave me alone", "that\u{2019}ll be all", "you\u{2019}re dismissed"] {
+            for variant in withPunctuation(phrase) {
+                punctuated += 1
+                if !OrbitVoiceIntentHelpers.isSessionStopCommand(variant) {
+                    failures.append("punctuated dismissal missed → \"\(variant)\"")
+                }
+            }
+        }
+        for phrase in presenceQuestions {
+            for variant in [phrase + ".", phrase + "?"] {
+                punctuated += 1
+                if !OrbitWakePhraseMatcher.isPresenceQuestion(variant) {
+                    failures.append("punctuated presence question missed → \"\(variant)\"")
+                }
+            }
+        }
+
         let total = legacyPositives.count + newPositives.count + negatives.count
-            + presenceQuestions.count + notQuestions.count + restIntents.count + notRestIntents.count + 27
+            + presenceQuestions.count + notQuestions.count + restIntents.count
+            + notRestIntents.count + punctuated + 27
         print("wake: legacy \(legacyPositives.count) · new \(newPositives.count) · negatives \(negatives.count)")
         print("questions: \(presenceQuestions.count) asked / \(notQuestions.count) plain summons")
         print("rest: \(restIntents.count) rest intents / \(notRestIntents.count) sleep commands")
+        print("punctuation: \(punctuated) punctuated variants (SpeechAnalyzer adds them)")
 
         if failures.isEmpty {
             print("✅ wake corpus: all \(total) phrases behave correctly")

@@ -1662,6 +1662,41 @@ approach. The toggle stays **default off**.
 beyond the toggle's own scope. Anything touching capture must be verified with the mic
 actually running before it ships, not only by a corpus and a clean build.
 
+### Phase 3.30 — DONE (2026-08-03): "sleep" opened Safari again — one line, whole class
+
+Barge-in confirmed working (interrupt on "stop", then listening, then waiting patiently). Then
+Ayush said *"sleep"* and got *"Opening sleep."* — **the exact bug Phase 3.9 fixed**, back again.
+
+The guard was still there and still correct. Running the real helper found why:
+
+```
+"sleep"    isRestIntent = YES
+"Sleep."   isRestIntent = NO      ← what SpeechAnalyzer actually produces
+```
+
+`normalize()` trimmed whitespace **before** turning punctuation into spaces, so `"Sleep."`
+became `"sleep "` — with a **trailing space** — and every pattern anchored with `$` silently
+missed. One line, wrong order.
+
+**Why no test caught it, which is the part that matters.** macOS 26's SpeechAnalyzer
+**punctuates what it hears**; the previous `SFSpeechRecognizer` did not. Phase 3.7/3.8 changed
+the ears and every phrase corpus kept testing bare, unpunctuated text — an input the app no
+longer receives. The corpus was passing on a fiction.
+
+Fixes:
+- **Trim last.** `normalize()` now strips punctuation, collapses whitespace, *then* trims.
+- **Audited every other normalizer in the app** — `OrbitWakePhraseMatcher`,
+  `OrbitClipboardIntelligence`, `OrbitCommunicationDrafting`, `OrbitWebActionIntent`,
+  `+Utilities` — all already trim last. `OrbitVoiceIntentHelpers` was the only one wrong, and
+  it happens to own rest intents, stop commands, farewells and dismissals: the worst possible
+  place for it.
+- **The wake corpus now tests what the recogniser actually emits.** Every rest intent, sleep
+  *command*, dismissal and presence question is re-run with `.` `!` `?` `,` appended — **176
+  punctuated variants**, corpus 203 → **379 phrases**.
+
+Verified: 379 wake phrases, five other corpora, 210 pytest, clean xcodebuild.
+**Xcode rebuild required.**
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias
