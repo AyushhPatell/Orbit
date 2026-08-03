@@ -1251,6 +1251,50 @@ next message → no second welcome (state consumed)
 Verified: **144 pytest**, wake + reminder corpora, CI green, migration applied to the live DB
 with all rows intact. Backend restarted. **No Xcode rebuild needed** — Python only.
 
+### Phase 3.19 — DONE (2026-08-03): consolidation, delta briefings, and a real cosine
+
+**`cosine_similarity` was a bare dot product.** That is only cosine when both vectors are
+unit length — `nomic-embed-text` vectors have magnitude ~20, so scores came back **150-350
+instead of 0-1**. Consequences, silent since real embeddings were switched on in Phase 3.5:
+every stored memory cleared the `0.6` relevance gate in `semantic_search`, and ranking was
+driven by vector magnitude rather than meaning. Recall was "the top few of everything".
+Normalising at comparison time fixes existing rows with no re-embedding.
+
+Fixing it exposed that **all 19 `semantic_vectors` were still regex debris** — *"I am doing
+good, thank for asking!"*, *"Nothing, I'm just being lazy"*. The third regex writer
+(semantic candidates) is now gated like the other two, the junk is purged, and semantic
+memory is seeded from the 7 curated facts so recall works immediately. Measured before and
+after — the right memory now ranks first for every probe:
+
+```
+"when does my shift end"  → Co-op shift runs 8:30 AM to 4:30 PM on working days
+"who are my friends"      → Has friends named Kawan and Shruti
+"what do I do for fun"    → Created Kachuful, a real-time online card game website
+```
+
+Live: *"remind me what you know about my work"* → *"You work as IT Support at Dalhousie
+University and you're currently doing a co-op term at Halifax Regional Municipality. Your
+co-op shift is 8:30 AM to 4:30 PM on working days."*
+
+**Consolidation (the sleep cycle).** A deterministic daily pass that retires near-duplicate
+life events and events whose moment has passed, and merges facts filed under different
+categories (write-time dedupe only ever looked *within* a category, so those survived
+twice). Nothing is deleted — entries are marked `is_resolved`. Paraphrases use the embedder
+when it is live and lexical distance when it is not: missing a paraphrase is acceptable,
+fusing two real plans is not. Entity-level merging (Kan/Kawan) is deliberately **not** here.
+
+**Delta briefings.** An explicit "what's on today" gets the picture — but asking again an
+hour later and hearing the identical list is the 3 PM recital, just invited rather than
+volunteered. What he already heard is named for the brain, which then leads with what
+changed or says "nothing new" in one line.
+
+**Test isolation hardened.** The store is now function-scoped (a shared one made
+consolidation results depend on run order — the same hidden coupling as writing to prod),
+and the embedder is off by default so the suite cannot behave differently depending on
+whether Ollama happens to be running.
+
+Verified: **162 pytest in a clean clone with no `.env` and no Ollama**, both corpora, CI green.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias
