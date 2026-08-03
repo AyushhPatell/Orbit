@@ -3,7 +3,16 @@
 **Written:** 2026-08-03, after the "3 PM briefing" incident.
 **What this is:** the complete list — every fix, improvement, and evolution across the whole system, small to large, ordered by what it does for the vision: a companion that says the right thing, at the right time, in the right words — and stays quiet the rest.
 
-**Method honesty:** the core loops (prompt assembly, memory, nudging, voice commit, routing, brain protocol) were read line-by-line and the failing case was reproduced against real code and the real DB. The wider Swift surface (~23K lines) was mapped and spot-verified, not 100% read. Every claim below marked **[verified]** was proven by running code or querying data, not by reading.
+**Method honesty:** the core loops (prompt assembly, memory, nudging, voice commit, routing, brain protocol) were read line-by-line and the failing case was reproduced against real code and the real DB. The wider Swift surface (~23K lines) was mapped and spot-verified, not 100% read. Every claim below marked **[verified]** was proven by running code or querying data, not by reading. *(One claim was marked `[verified]` in error on 2026-08-03 and is corrected in §0 rather than deleted — a wrong diagnosis stays on the record.)*
+
+### Status legend — nothing is marked done on assumption
+
+- ✅ **DONE** — shipped **and** confirmed working by Ayush in real use.
+- 🟡 **SHIPPED** — code in, tests + replay green, **not yet confirmed in daily use.** Not done.
+- ⬜ **OPEN** — not started.
+- ⛔ **WITHDRAWN** — proposed on a wrong diagnosis; kept visible with the reason.
+
+Anything 🟡 stays 🟡 until Ayush says it behaves right. A passing test is evidence, not confirmation.
 
 ---
 
@@ -11,8 +20,18 @@
 
 Four independent layers failed. Each is its own fix; together they produced the exact behaviour Ayush saw.
 
-**Layer 1 — the ears committed a thought-pause.** [verified]
-`OrbitSpeechInputController.swift:258` scales the silence window by transcript *length* — short transcript → shortest pause. A bare "Um" while thinking is the fastest possible commit, the exact opposite of what a thinking human needs. The only guard downstream (`OrbitWakeVoiceBackstage.swift:122`) is `!trimmed.isEmpty` — "Um" passes.
+**Layer 1 — the ears committed a thought-pause.** [verified — *corrected 2026-08-03, see below*]
+There was **no filler guard anywhere**. "Um" waited out its silence window and was committed as a real message; the only downstream guard (`OrbitWakeVoiceBackstage.swift:122`) is `!trimmed.isEmpty`, which "Um" passes.
+
+> **Correction — my original claim here was wrong.** I first wrote that the endpoint curve gave short transcripts the *shortest* pause, and marked it `[verified]` without running it. It isn't true. Compiling the pre-fix `endpointPauseSeconds` from git and running it:
+>
+> ```
+> "Um"                  -> 1.70s      (words<=2 branch: base + 0.45)
+> "turn off the wifi"   -> 1.25s      (base)
+> "That's done."        -> 1.00s      (shortest — trailing punctuation)
+> ```
+>
+> Short transcripts already got *more* time, not less. The real defect was simply that **1.7 s is not long enough for a person deciding what to say, and nothing checked whether the committed text was content at all.** The shipped fix (6 s window for filler + never send filler-only) is unaffected and works — but the stated cause was wrong, and roadmap item **E2 was built on that error and is withdrawn.** Recorded here rather than quietly edited, per the same rule that governs ORBIT.md.
 
 **Layer 2 — "Approach B" rewrote his message.** [verified — reconstructed byte-for-byte]
 `main.py:673-684` prepends every non-PAST life event *into the user message*. What the brain actually received at 18:13 on Aug 2 (turns 1349-1350):
@@ -33,7 +52,13 @@ The model answered the only content present: the context block. The comment in c
 **Layer 4 — no novelty guard.** [verified — turns 1351-1352]
 The nudge system (`_get_nudge_candidates`) has a 48-hour dedupe — but Approach B has **none** and runs on **every turn**. His next utterance, "okay?", got the identical context block prepended, and the recital came back a second time.
 
-### The fix package (proposed — awaiting approval)
+### The fix package — ✅ **DONE** (shipped Phase 3.16, confirmed by Ayush 2026-08-03: *"it is fine now"*)
+
+Field-confirmed: the "Um" pause and the bath sentence both behave correctly.
+Still 🟡 *within* this package — shipped and tested, but not yet observed in daily use:
+the **repetition guard** (needs a real repeat to trigger), **greet-once** (needs two
+greetings in a stretch), and the **intra-day staleness** flip to "LIKELY DONE" (needs a
+morning plan revisited hours later).
 
 1. **Filler-only commits never leave the Mac.** After `stripDisfluencies`, if nothing but filler remains and no question is pending: don't send — keep listening with an *extended* window. Silence is the human response to someone thinking.
 2. **Kill Approach B; replace with a proactivity governor.** Life events return to the system prompt only (with ages, layer 3 below). A reply may volunteer at most **one** unprompted item, and only when: (a) the user's message is a greeting/opener or an explicit "what's up today", (b) the item is *novel* (never spoken before — tracked persistently, the way nudges already are), and (c) it's *timely* (due-soon beats historical). A substantive user message means: answer what he said, volunteer nothing.
@@ -43,7 +68,13 @@ The nudge system (`_get_nudge_candidates`) has a 48-hour dedupe — but Approach
 
 ---
 
-## 1 · URGENT — the GitHub push leaked a live key [verified]
+## 1 · ✅ DONE — the GitHub push leaked a live key [verified, resolved 2026-08-03]
+
+Key rotated by Ayush the same day (GitHub's scanner flagged it on push). Repo cleaned:
+`.env.backup` untracked, `.gitignore` hardened against every `.env` variant plus build/runtime
+junk, **3,247 → 136 tracked files**. `data/` never leaked — verified. Original record below.
+
+
 
 - `.gitignore` covers `.env` — but **`orbit-core/.env.backup-2026-08-01` is tracked and pushed**, and it contains the OpenAI `CLOUD_API_KEY`. **Rotate that key today** (platform.openai.com → API keys → revoke + recreate), then `git rm` the backup. Rotation is the real fix — history scrubbing is optional after the key is dead.
 - Also pushed, harmless but junk: the entire `.derivedData/` build tree (thousands of files), `.run/logs/*`, `orbit_core.egg-info`. Add to `.gitignore`: `.env*`, `!.env.example`, `.run/`, `.derivedData/`, `*.log`.
@@ -55,8 +86,8 @@ The nudge system (`_get_nudge_candidates`) has a 48-hour dedupe — but Approach
 
 | # | Item | Size |
 |---|---|---|
-| E1 | **Filler-only commit guard** (case fix #1). | S |
-| E2 | **Invert the endpoint curve's bottom end**: near-empty transcript = *longer* wait, not shorter. The current curve punishes thinking. | S |
+| E1 | ✅ **DONE** — filler-only commit guard. `isFillerOnly` + 6 s thinking window; filler never leaves the Mac. Confirmed by Ayush. | S |
+| ~~E2~~ | ~~Invert the endpoint curve's bottom end~~ — **WITHDRAWN 2026-08-03.** Based on a wrong reading of `endpointPauseSeconds` (see the correction in §0): short transcripts already get *more* time. Nothing to invert. | — |
 | E3 | **Semantic endpointing**: commit on *meaning-complete*, not silence alone. Industry standard is now silence (~800-1200 ms) + a completeness score over the partial transcript; the local Ollama/Foundation-Models tier can score "does this read finished?" — "remind me to…" hangs open, "remind me to call mom" commits. Kills both early-commit and long-sentence-cutoff classes at the source. | M |
 | E4 | **Barge-in**: speaking while ORBIT talks should interrupt him (echo-cancelled listening during TTS, "stop/wait" without wake word). A companion is interruptible. | M |
 | E5 | **Guest awareness**: "my friend Shruti is here, say hi" stored *Shruti's presence as an Ayush relationship fact* [verified in DB]. Detect the introduce-a-guest pattern → greet the guest, don't file their speech as Ayush's life. | S-M |
@@ -67,11 +98,11 @@ The nudge system (`_get_nudge_candidates`) has a 48-hour dedupe — but Approach
 
 | # | Item | Size |
 |---|---|---|
-| M1 | **Pollution sweep** (work-list #2): `personal_knowledge` is mostly raw transcript — "I want to delete few reminders" filed under *goals* [verified]. One-time cleanup pass (brain re-extracts real facts from the junk rows, deletes the rest), plus the same validators the new extractor already has. | S |
-| M2 | **Temporal label bug** (work-list #3): after one day, `weekend`/`next-week` events are labelled `PAST (yesterday)` [verified by running it]. Future plans read as history — the inverse of the companion vision. Fix the fall-through; add proper day-of-week resolution. | S |
+| M1 | ⬜ **AWAITING AYUSH'S DECISION** — pollution sweep. Root cause found [verified]: Phase 3.6 added the LLM extractor but **never stopped the regex writers**, so both ran on every turn; **all 16 `personal_knowledge` rows are regex-written, zero from the LLM**. The junk is then fed back to the LLM as "already known, do not repeat", suppressing the clean version of the same fact — self-reinforcing. Prevention shipped (M5); the **cleanup of existing rows is destructive and not done**. DB backed up; brain dry-run proposes 5 clean facts to replace all 16, but drops two real ones (co-op shift 8:30–4:30, returning full-time next term) — needs his call. | S |
+| M2 | 🟡 **SHIPPED (Phase 3.16), awaiting field confirmation** — temporal label bug (work-list #3). `_temporal_label` rewritten: date words resolve against the day they were said, so `weekend`/`next-week` no longer flip to PAST after one day. Also fixed a silent 3-hour age skew (DB stores UTC, code compared local). 10 regression tests. Needs multi-day real use to confirm. | S |
 | M3 | **Event lifecycle**: planned → due → likely-done → confirmed/expired. The `is_resolved` column already exists and is never written [verified]. This unlocks the *right* follow-up ("how was the movie?" **after** 5 PM, never before) — the single highest-leverage companion feature on this list. | M |
-| M4 | **Absolute timestamps rendered as ages** everywhere a memory enters a prompt ("5h ago", "yesterday morning") — models reason about ages far better than about labels. | S |
-| M5 | **Stop recording tool operations as life events**: "Turned off sleep mode and adjusted brightness to 50%" is ORBIT's command log, not Ayush's life [verified in DB]. Filter category/source at extraction. | S |
+| M4 | 🟡 **SHIPPED (Phase 3.16)** — memories now enter the prompt with human ages ("shared 5 hours ago"). Part of the confirmed package, but the ages themselves haven't been spot-checked in use. | S |
+| M5 | 🟡 **SHIPPED 2026-08-03, awaiting field confirmation** — tool operations no longer recorded as life events. Two parts: regex writers now run **only** when no brain key exists (they were never meant to run alongside the LLM pass), and `is_tool_operation()` structurally drops ORBIT's command log at extraction — prompting alone had failed. Calendar *plans* deliberately survive; only ORBIT's own artefacts (reminders/alarms/notes) and device actions are dropped. 20/20 on real DB entries, 6 new tests. | S |
 | M6 | **Duplicate-turn bug**: "turn off the wifi" saved **six times** in the same second, one copy being raw plumbing ("set_system_feature: Wi-Fi is off.") as an assistant turn [verified, turns 1355-1366]. Likely the offline/retry path re-saving. Needs a trace-first diagnosis, then an idempotency key on turn saves. | M |
 | M7 | **Nightly consolidation ("sleep cycle")**: dedupe (three Spider-Man entries, three Kan/Kawan entries [verified]), merge contradictions, promote stable episodic facts to semantic knowledge, decay importance, expire dated items. Current research separates an episodic buffer from event-driven semantic consolidation exactly this way. Runs on the brain overnight; ports to iOS unchanged. | M-L |
 | M8 | **Entity resolution / personal knowledge graph**: "Kan" and "Kawan" are one person split by an STT mishear [verified — the calendar rename proves it]. Entities (people, places, projects) with relationships and event links, grounded against Contacts. Temporal knowledge graphs (Zep/Graphiti-style) are the state of the art for exactly this. The Kachuful entry shows the payoff: ORBIT knowing *what things are*, not just what was said. | L |
@@ -82,11 +113,11 @@ The nudge system (`_get_nudge_candidates`) has a 48-hour dedupe — but Approach
 
 | # | Item | Size |
 |---|---|---|
-| V1 | **Proactivity governor** (case fix #2) — one place that decides *whether ORBIT volunteers anything*: novelty + relevance + timing + budget (max one item). Merge the nudge system into it; Approach B dies. | M |
-| V2 | **Repetition guard** (case fix #4) — structural near-duplicate detection against recent replies. | S |
+| V1 | ✅ **DONE (Phase 3.16)** — proactivity governor. Approach B deleted; volunteering gated structurally on `_is_conversational_opener`, so a substantive message can't trigger a briefing. Confirmed by Ayush. | M |
+| V2 | 🟡 **SHIPPED (Phase 3.16)** — structural near-duplicate guard (difflib ≥ 0.85 vs last 3 assistant turns, short replies exempt, one regeneration). Tested, but no real repeat has occurred in use yet. | S |
 | V3 | **Delta briefings**: "what's up today" answers with *what changed since last briefing*, not the full recital. First-ask-of-the-morning gets the full picture. | M |
 | V4 | **Presence model**: "I'm going for a bath, back in 30" → warm one-line ack, an away-state that suppresses proactivity, and "welcome back" on return. This is the exact moment in the field test where the vision says a *person* would have said "sure, see you in a bit" — and it's cheap: a local state + timer. | S-M |
-| V5 | **Greet once per session** (case fix #5). | S |
+| V5 | 🟡 **SHIPPED (Phase 3.16)** — a repeated time-of-day greeting is stripped when the previous reply already opened with one. Tested; not yet seen in use. | S |
 | V6 | **Instant local ack while the brain thinks** ("on it…") — latency shaping so tool turns feel alive. Needs care with E4 so the ack is interruptible. | M |
 | V7 | **TTS upgrade path**: AVSpeechSynthesizer prosody is the last robotic layer standing once the words are right. Evaluate macOS 26 premium/personal voices; keep first-party (iOS portability rule). | M |
 | V8 | Farewell/dismissal handling is now good (Phase 3.13) — protect it with the corpus whenever V1-V5 land. | — |
@@ -129,10 +160,10 @@ The nudge system (`_get_nudge_candidates`) has a 48-hour dedupe — but Approach
 ## 8 · SEQUENCING (proposal)
 
 **Now (this week):**
-1. Rotate the OpenAI key + repo hygiene (N4) — *today*.
-2. The case fix package (E1, V1, V2, V5, M4's intra-day part) — kills the entire "context-blind proactivity" class.
-3. M1 pollution sweep + M2 temporal bug — small, and they feed directly into the fix package's quality.
-4. N3 CI — one YAML file, permanent safety net.
+1. ~~Rotate the OpenAI key + repo hygiene (N4)~~ — ✅ **DONE 2026-08-03.**
+2. ~~The case fix package (E1, V1, V2, V5, M4)~~ — ✅ **DONE, Phase 3.16**, confirmed by Ayush.
+3. ~~M2 temporal bug~~ — 🟡 shipped. **M1 pollution sweep** — prevention shipped (M5); the destructive cleanup awaits Ayush's decision.
+4. **N3 CI** — one YAML file, permanent safety net. ⬅ *next up*
 
 **Next (the companion leap):**
 5. M3 event lifecycle + M5 tool-op filter — unlocks *right-time* follow-ups.

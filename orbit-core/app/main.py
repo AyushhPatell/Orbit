@@ -1624,25 +1624,33 @@ async def chat(payload: ChatRequest) -> ChatResponse:
                     importance=score,
                     conflict_sig=conflict_signature(candidate),
                 )
-        # Episodic life event extraction
-        for ev in extract_life_events(source_text):
-            memory.add_life_event(
-                ev["summary"],
-                category=ev.get("category", "general"),
-                emotion=ev.get("emotion"),
-                event_date=ev.get("event_date"),
-                importance=ev.get("importance", 0.5),
-            )
+        # Regex extraction is the OFFLINE fallback only. Phase 3.6 introduced the LLM
+        # extractor to replace it, but never stopped the regex writers — so both ran on
+        # every turn and the regex pair kept filing raw transcript as knowledge ("I want
+        # to delete few reminders" under *goals*). Worse, that junk is fed back to the LLM
+        # as "already known, do not repeat", suppressing the clean version of the same
+        # fact. When a brain key exists the LLM pass owns memory; turns are saved either
+        # way, so anything captured offline is distilled once connectivity returns.
+        regex_extraction_only = not s.brain_api_key.strip()
+        if regex_extraction_only:
+            for ev in extract_life_events(source_text):
+                memory.add_life_event(
+                    ev["summary"],
+                    category=ev.get("category", "general"),
+                    emotion=ev.get("emotion"),
+                    event_date=ev.get("event_date"),
+                    importance=ev.get("importance", 0.5),
+                )
         # Emotion tracking
         emotion_result = detect_emotion(source_text)
         if emotion_result:
             emotion_label, emotion_score = emotion_result
             memory.log_mood(emotion_label, emotion_score, source_text[:100])
-        # Personal knowledge extraction — learn about Ayush from every conversation
-        for pk in extract_personal_knowledge(source_text):
-            memory.add_personal_knowledge(
-                pk["category"], pk["fact"], pk.get("importance", 0.5), source_text[:100]
-            )
+        if regex_extraction_only:
+            for pk in extract_personal_knowledge(source_text):
+                memory.add_personal_knowledge(
+                    pk["category"], pk["fact"], pk.get("importance", 0.5), source_text[:100]
+                )
         memory.prune_semantic_memory(
             retention_days=s.semantic_memory_retention_days,
             max_items=s.semantic_memory_max_items,

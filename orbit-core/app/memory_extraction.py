@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Optional
 
 import httpx
@@ -56,6 +57,11 @@ Rules:
 - The transcript comes from speech recognition and may be garbled. Record only what you are
   confident about; silently drop the rest.
 - Record nothing from commands ("turn off wifi"), small talk, or ORBIT's own replies.
+- NEVER record what ORBIT did. Device actions and assistant bookkeeping are not the user's
+  life: "Turned off sleep mode and adjusted brightness to 50%", "Deleted a reminder",
+  "Set a reminder for 5 PM", "Call with X was deleted" are all WRONG — they are ORBIT's
+  command log. Record the user's own plans, feelings and events only. If a turn contains
+  nothing but ORBIT operating the machine, return empty arrays.
 - Do NOT repeat anything in the "Already known" list.
 - One clean fact is better than five noisy ones. Empty arrays are a perfectly good answer.
 """
@@ -135,6 +141,50 @@ def _clean_knowledge(items: Any) -> list[dict[str, Any]]:
     return out[:8]
 
 
+# Model output is untrusted, and the "record nothing from commands" rule is one the model
+# has demonstrably broken — "Turned off sleep mode and adjusted screen brightness to 50%"
+# was filed as a life event. Prompting is not enforcement; this is.
+_DEVICE_ACTION_RE = re.compile(
+    r"\b(?:"
+    r"turn(?:ed|s)?\s+(?:on|off)|switch(?:ed)?\s+(?:on|off)|"
+    r"(?:set|adjust(?:ed)?|chang(?:e|ed)|lower(?:ed)?|rais(?:e|ed)|dimm?(?:ed)?|increas(?:e|ed)|"
+    r"decreas(?:e|ed)|mut(?:e|ed))\s+(?:the\s+)?"
+    r"(?:volume|brightness|screen|display|wi-?fi|bluetooth|focus|dark\s+mode|night\s+shift)|"
+    r"open(?:ed)?\s+(?:safari|chrome|firefox|arc|spotify|finder|terminal)|"
+    r"(?:wi-?fi|bluetooth|dark\s+mode|sleep\s+mode|do\s+not\s+disturb)\s+(?:is|was|were)\s+"
+    r"(?:on|off|enabled|disabled)|"
+    r"locked\s+the\s+screen"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ORBIT's own artefacts. A reminder or note is not a life event — the Reminders and Notes
+# apps already hold it, and ORBIT can read them back with a tool. Calendar *plans* are
+# deliberately NOT in this list: "call with Kawan Thursday 2 PM" is a real commitment
+# worth remembering, even when the sentence describing it came from bookkeeping.
+_ARTEFACT_CRUD_RE = re.compile(
+    r"(?:"
+    r"\b(?:set|setting|create[ds]?|creating|delete[ds]?|deleting|remove[ds]?|removing|add(?:ed|s|ing)?|"
+    r"updat(?:e|ed|ing)|schedul(?:e|ed|ing)|complet(?:e|ed|ing)|mark(?:ed|s|ing)?|clear(?:ed|s|ing)?)\b"
+    r"[^.;]{0,40}?\b(?:reminders?|alarms?|notes?)\b"
+    r"|"
+    r"\b(?:reminders?|alarms?|notes?)\b[^.;]{0,40}?\b(?:was|were|is|are|have\s+been|has\s+been)\s+"
+    r"(?:set|created|deleted|removed|added|updated|scheduled|completed|cleared)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_tool_operation(summary: str) -> bool:
+    """True when a 'life event' is really ORBIT's own command log.
+
+    The model breaks the prompt's "record nothing from commands" rule — "Turned off sleep
+    mode and adjusted screen brightness to 50%" was filed as Ayush's life. Prompting is not
+    enforcement; this is.
+    """
+    return bool(_DEVICE_ACTION_RE.search(summary) or _ARTEFACT_CRUD_RE.search(summary))
+
+
 def _clean_events(items: Any) -> list[dict[str, Any]]:
     valid_when = {"today", "tomorrow", "weekend", "next-week", "past"}
     valid_emotion = {"positive", "negative", "stressed", "low-energy"}
@@ -146,6 +196,8 @@ def _clean_events(items: Any) -> list[dict[str, Any]]:
             continue
         summary = str(item.get("summary") or "").strip()
         if len(summary) < 4 or len(summary) > 280:
+            continue
+        if is_tool_operation(summary):
             continue
         emotion = str(item.get("emotion") or "").strip().lower()
         when = str(item.get("when") or "").strip().lower()
