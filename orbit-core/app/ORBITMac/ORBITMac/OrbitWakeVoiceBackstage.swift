@@ -1252,16 +1252,23 @@ final class OrbitWakeVoiceBackstage {
                 OrbitListeningPresence.shared.presentWakeVoiceCard(from: cleanedReply, ttlSeconds: 30)
                 if autoSpeakReplies { speech.speak("The result is on your screen.") }
             } else if autoSpeakReplies {
-                // A question from the brain is a clarification, and clarifications have always
-                // been shown as a banner with the question written out — deliberately, so there
-                // is no ambiguity about what is being asked. That banner lived only in the local
-                // `.ask` branch, so moving clarifications to the brain (Phases 3.11/3.14) silently
-                // dropped it and left a bare listening orb. Restored here.
-                if cleanedReply.hasSuffix("?") {
+                // Clarifications are shown as a card with the question written out — hearing a
+                // question and seeing a bare orb is ambiguous. Phase 3.15 restored that by
+                // carding ANY reply ending in "?", which was too blunt: most of ORBIT's
+                // questions are ordinary conversation, so the card became noise. The policy
+                // now asks whether the content is worth reading or getting exactly right —
+                // a choice, a confirmation, a misheard name, a missing detail, real data.
+                if let cardReason = OrbitCardPolicy.reason(
+                    for: cleanedReply,
+                    pendingChoice: pendingNeedsVoice
+                ) {
                     OrbitListeningPresence.shared.hideConstellation()
                     OrbitListeningPresence.shared.presentWakeVoiceCard(
                         from: cleanedReply,
-                        ttlSeconds: wakeCardTTLSeconds(for: cleanedReply)
+                        ttlSeconds: OrbitCardPolicy.ttlSeconds(
+                            for: cardReason,
+                            replyLength: cleanedReply.count
+                        )
                     )
                 }
                 if willResume, cleanedReply.isEmpty {

@@ -48,6 +48,10 @@ jobs:
         working-directory: orbit-core/app/ORBITMac/Tests
         run: ./run-completeness-corpus.sh
 
+      - name: Floating-card policy corpus
+        working-directory: orbit-core/app/ORBITMac/Tests
+        run: ./run-card-corpus.sh
+
   app-build:
     name: ORBITMac builds
     runs-on: macos-latest
