@@ -1333,6 +1333,55 @@ Verified: **176 pytest**, both corpora, CI green. **Still open:** the Swift side
 name handling for contacts/calendar; misheard names typed into the panel path are not yet
 routed through this.
 
+### Phase 3.21 — DONE (2026-08-03): semantic endpointing — ORBIT waits for a finished thought
+
+Silence alone decided when Ayush had stopped talking, so *"remind me to…"* and a finished
+sentence were treated identically. That is the same mistake as the "Um" bug — ORBIT hears a
+gap and assumes the thought is over. A person doesn't: *"remind me to…"* is obviously the
+first half of a request. It is also the cause of the long-standing weakness in this document,
+*"very long sentences with mid-sentence natural pauses can still commit early."*
+
+`OrbitUtteranceCompleteness.swift` reads **what was said**, not just how long the silence was.
+The whole endpoint decision moved into it as a pure function, so the corpus can exercise it
+with no audio engine, permissions or running app.
+
+Linguistic rather than model-based, deliberately: it runs on **every partial transcript**, so
+it must be instant (no I/O, no inference), must work offline like the rest of the ears, and
+must port to iOS. Four signals mark an unfinished thought — a dangling function word
+(`to`, `and`, `the`, `at`, `because`), an utterance made *entirely* of function words
+("could you please"), a sentence ending on its own subject ("can you"), and a transitive
+command verb with nothing to act on ("remind me to call").
+
+**Precision over recall, stated as a rule:** a false "he's still talking" adds dead air to
+*every* turn, which is worse than the bug being fixed. So only strong evidence extends the
+window, and the tuned length heuristics are untouched otherwise.
+
+The corpus immediately earned itself — **7 real failures on the first run**, each fixed in the
+rules rather than the expectations, and each pair is now pinned:
+
+| same final word | verdict |
+|---|---|
+| "can you" / **"how are you"** | wait / don't — the wh-opening decides |
+| "I'll give him a call" / **"remind me to call"** | don't / wait — a determiner makes it a noun |
+| "cancel that" | don't — `that`/`this`/`some`/`any` end real commands and were removed |
+
+Measured (base 1.25 s):
+
+```
+remind me to                     2.60s      turn off the wifi            1.25s
+the meeting is at                2.60s      cancel that                  1.70s
+remind me at five                2.60s      how are you                  1.25s
+could you please                 2.60s      That's done.                 1.00s
+um                               6.00s      …Spiderman at five PM        1.60s
+```
+
+New `Tests/run-completeness-corpus.sh` (69 checks), wired into CI. Wake corpus (203) and
+reminder corpus unchanged and green; clean xcodebuild. **Xcode rebuild required.**
+
+**Honest limit:** a pause after a grammatically *complete* clause ("I was thinking about the
+gym" … "and then swimming") is invisible to text alone — catching that needs prosody or a
+trained turn-detector. The length rules soften it; they do not solve it.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias

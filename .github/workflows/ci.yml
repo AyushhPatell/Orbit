@@ -44,6 +44,10 @@ jobs:
         working-directory: orbit-core/app/ORBITMac/Tests
         run: ./run-reminder-corpus.sh
 
+      - name: Semantic endpointing corpus
+        working-directory: orbit-core/app/ORBITMac/Tests
+        run: ./run-completeness-corpus.sh
+
   app-build:
     name: ORBITMac builds
     runs-on: macos-latest

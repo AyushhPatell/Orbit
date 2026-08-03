@@ -258,39 +258,12 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + pause, execute: work)
     }
 
+    /// Silence alone was deciding when he had finished, so "remind me to…" and a thinking pause
+    /// were treated the same as a finished sentence. The decision now also reads what was said —
+    /// see `OrbitUtteranceCompleteness`, where it lives as a pure function so the corpus can
+    /// exercise it without an audio engine.
     private func endpointPauseSeconds(for transcript: String) -> TimeInterval {
-        let base = silenceAfterSeconds
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return base
-        }
-        // Nothing but "um"/"uh" so far: he is thinking. Short transcripts used to get the
-        // SHORTEST pause, so a thinking sound was committed fastest of all — give the
-        // thought room instead. If real words follow, the normal pauses take over below;
-        // if nothing follows, the session ends silently (see stopListening).
-        if OrbitUtteranceCleanup.isFillerOnly(trimmed) {
-            return 6.0
-        }
-        let words = trimmed.split(whereSeparator: \.isWhitespace).count
-        let lastWord = trimmed
-            .split(whereSeparator: \.isWhitespace)
-            .last?
-            .lowercased()
-            .trimmingCharacters(in: CharacterSet(charactersIn: ".,!?;:")) ?? ""
-        if let last = trimmed.last, [".", "!", "?"].contains(last) {
-            return max(0.85, base - 0.25)
-        }
-        if ["and", "or", "but", "so", "because", "to", "for", "with", "of", "the", "a", "an"].contains(lastWord) {
-            return min(2.4, base + 0.65)
-        }
-        // Long transcript = user is mid-sentence; give more time, not less
-        if words >= 10 {
-            return min(2.4, base + 0.35)
-        }
-        if words <= 2 {
-            return min(2.0, base + 0.45)
-        }
-        return base
+        OrbitUtteranceCompleteness.endpointPause(for: transcript, base: silenceAfterSeconds)
     }
 
     private func requestAuthorization() async throws {
