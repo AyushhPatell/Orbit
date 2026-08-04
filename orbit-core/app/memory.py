@@ -183,6 +183,21 @@ class MemoryStore:
             # instant. Coarse labels like "today" cannot tell 4 PM from 9 PM, so ORBIT either
             # asked how something went before it happened, or spoke of a finished thing as
             # still upcoming. event_date stays for events with no time at all.
+            # Provenance. A memory without a source cannot be trusted or unwound: when
+            # someone else is in the room, the microphone hears THEM too, and their words
+            # were being filed as facts about Ayush ("Meet my friend Shruti she's listening"
+            # became a relationship fact). Recording who was present when a turn was captured
+            # is what makes "never attribute a guest's words to him" enforceable rather than
+            # hoped for.
+            try:
+                conn.execute("ALTER TABLE turns ADD COLUMN context TEXT NOT NULL DEFAULT 'alone'")
+            except sqlite3.OperationalError:
+                pass
+            for table in ("personal_knowledge", "life_events"):
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN provenance TEXT")
+                except sqlite3.OperationalError:
+                    pass
             try:
                 conn.execute("ALTER TABLE life_events ADD COLUMN occurs_at TEXT")
             except sqlite3.OperationalError:
@@ -198,11 +213,11 @@ class MemoryStore:
                 pass
             conn.commit()
 
-    def append_turn(self, session_id: str, role: str, content: str) -> None:
+    def append_turn(self, session_id: str, role: str, content: str, *, context: str = "alone") -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO turns (session_id, role, content) VALUES (?, ?, ?)",
-                (session_id, role, content),
+                "INSERT INTO turns (session_id, role, content, context) VALUES (?, ?, ?, ?)",
+                (session_id, role, content, context),
             )
             conn.commit()
 
@@ -474,7 +489,7 @@ class MemoryStore:
     # --- Personal knowledge profile ---
 
     def add_personal_knowledge(self, category: str, fact: str, importance: float = 0.5,
-                                source_turn: str = "") -> None:
+                                source_turn: str = "", provenance: Optional[str] = None) -> None:
         cleaned = fact.strip()
         if not cleaned:
             return
@@ -496,8 +511,9 @@ class MemoryStore:
                     conn.commit()
                     return
             conn.execute(
-                "INSERT INTO personal_knowledge (category, fact, importance, source_turn) VALUES (?, ?, ?, ?)",
-                (category, cleaned, imp, source_turn[:200]),
+                "INSERT INTO personal_knowledge (category, fact, importance, source_turn, provenance) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (category, cleaned, imp, source_turn[:200], provenance),
             )
             conn.commit()
 
@@ -848,6 +864,7 @@ class MemoryStore:
         importance: float = 0.5,
         occurs_at: Optional[str] = None,
         duration_minutes: int = 60,
+        provenance: Optional[str] = None,
     ) -> None:
         cleaned = summary.strip()
         if not cleaned:
@@ -857,10 +874,11 @@ class MemoryStore:
             conn.execute(
                 """
                 INSERT INTO life_events
-                    (summary, category, emotion, event_date, importance, occurs_at, duration_minutes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (summary, category, emotion, event_date, importance, occurs_at,
+                     duration_minutes, provenance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (cleaned, category, emotion, event_date, imp, occurs_at, duration_minutes),
+                (cleaned, category, emotion, event_date, imp, occurs_at, duration_minutes, provenance),
             )
             conn.commit()
 
@@ -937,6 +955,22 @@ class MemoryStore:
                 (session_id, after_id, limit),
             ).fetchall()
         return [(int(r[0]), str(r[1]), str(r[2])) for r in rows]
+
+    def turns_after_with_context(
+        self, session_id: str, after_id: int, limit: int = 40
+    ) -> list[tuple[int, str, str, str]]:
+        """Same rows, plus who was in the room when each was captured.
+
+        The extractor needs this to know which turns it must not mine for facts about
+        Ayush — with company present, the microphone hears everyone.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, role, content, COALESCE(context, 'alone') FROM turns "
+                "WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+                (session_id, after_id, limit),
+            ).fetchall()
+        return [(int(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
 
     def latest_turn_id(self, session_id: str) -> int:
         with self._connect() as conn:

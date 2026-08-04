@@ -13,6 +13,13 @@ import Foundation
 @MainActor
 enum OrbitToolDispatcher {
     static func dispatch(_ toolCall: ToolCallInfo) async -> String {
+        // Capability gate — the one place every brain tool must pass through. A switched-off
+        // capability is not a prompt rule the model might ignore: the tool never runs. And a
+        // refusal is NOT a failure, so it is deliberately not logged as missed-intent
+        // telemetry; nothing broke, he simply decided ORBIT shouldn't do this.
+        guard OrbitCapabilities.isAllowed(tool: toolCall.tool) else {
+            return OrbitCapabilities.refusal(for: toolCall.tool)
+        }
         let result = await run(toolCall)
         // Self-reporting: failed tool calls land in the missed-intent telemetry so
         // "show missed intents" surfaces real-world breakage without the user having

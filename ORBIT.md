@@ -1697,6 +1697,50 @@ Fixes:
 Verified: 379 wake phrases, five other corpora, 210 pytest, clean xcodebuild.
 **Xcode rebuild required.**
 
+### Phase 3.31 — DONE (2026-08-03): provenance — a guest's words are never facts about Ayush
+
+A microphone cannot tell who spoke. With someone else in the room, everything it hears lands
+in the same transcript — which is how *"Meet my friend Shruti she's listening"* became a
+stored fact about **Ayush's** relationships.
+
+- **`turns.context`** records who was present when each turn was captured (`alone` /
+  `company`). Existing rows default to `alone`, so nothing is retroactively suspect.
+- **Turns captured with company present are excluded from personal-knowledge extraction
+  entirely.** Enforced in code, not asked of the model — by now the reason should be obvious.
+  Life events still come through: the situation is real either way. If something really is a
+  fact about him, he will say it again when it is just the two of them.
+- **`provenance`** on `personal_knowledge` and `life_events` records source, turn range,
+  context and time — so any memory can be traced back and unwound, instead of a bad fact
+  being untraceable once stored.
+
+### Phase 3.32 — DONE (2026-08-03): capability gates — the guardrails Ayush asked for
+
+Long outstanding, and ORBIT.md stated the hole plainly: *"the brain can use any tool whenever
+the backing handler is allowed."* Five privacy toggles existed, but they guarded only the
+**phrase-matched** paths. When the brain got a full tool belt (Phase 1) it could open apps,
+run shortcuts, find files and change system state with **nothing checking whether that was
+wanted**.
+
+`OrbitCapabilities` closes it at the single choke point every brain tool passes through — the
+dispatcher. Ten switches (gear → **Capabilities**): Calendar, Reminders, Notes, Apps, Browser,
+Music, System settings, Files, Smart home, Terminal.
+
+- **A disabled capability is not a prompt rule the model might ignore** — the tool never runs.
+- **A refusal is not a failure.** It names the switch (*"Files & folders is switched off in
+  ORBIT's settings… gear menu → Capabilities"*) and is deliberately **not** logged as
+  missed-intent telemetry. Nothing broke; he decided.
+- **Defaults preserve today's behaviour exactly** — everything on, except **Terminal**, which
+  runs arbitrary shell commands and is now off unless asked for.
+- **An unlisted tool is allowed through**, so a future tool can't become invisible just
+  because nobody updated the table. The corpus asserts every *acting* tool is gated, so that
+  leniency can't hide a gap either.
+
+New `Tests/run-capability-corpus.sh` (50 checks) in CI: all 22 acting tools gated, 3 read-only
+tools ungated, defaults verified, refusal wording checked for blame-free language.
+
+Verified: **216 pytest**, seven corpora, clean xcodebuild, migration applied to the live DB
+with all rows intact. **Xcode rebuild required.**
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias

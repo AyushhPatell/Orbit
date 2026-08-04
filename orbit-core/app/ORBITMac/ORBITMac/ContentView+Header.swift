@@ -35,6 +35,18 @@ extension ContentView {
                     Toggle("Read email", isOn: $allowEmail)
                     Toggle("Clipboard access", isOn: $allowClipboard)
                 }
+                Section("Capabilities") {
+                    Toggle("Calendar", isOn: $capCalendar)
+                    Toggle("Reminders", isOn: $capReminders)
+                    Toggle("Notes", isOn: $capNotes)
+                    Toggle("Open & quit apps", isOn: $capApps)
+                    Toggle("Web browsing & search", isOn: $capBrowser)
+                    Toggle("Music control", isOn: $capMedia)
+                    Toggle("System settings (volume, brightness, wi-fi…)", isOn: $capSystem)
+                    Toggle("Files & folders", isOn: $capFiles)
+                    Toggle("Smart home shortcuts", isOn: $capSmartHome)
+                    Toggle("Terminal commands", isOn: $capTerminal)
+                }
                 Section("Advanced") {
                     Toggle("Routing & model details", isOn: $showRoutingDebug)
                     Toggle("Memory debug", isOn: $showMemoryDebug)

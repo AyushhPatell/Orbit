@@ -60,6 +60,10 @@ jobs:
         working-directory: orbit-core/app/ORBITMac/Tests
         run: ./run-bargein-corpus.sh
 
+      - name: Capability gate corpus
+        working-directory: orbit-core/app/ORBITMac/Tests
+        run: ./run-capability-corpus.sh
+
   app-build:
     name: ORBITMac builds
     runs-on: macos-latest

@@ -31,6 +31,19 @@ struct ContentView: View {
     @AppStorage("orbitMac.allowEmail") var allowEmail = true
     @AppStorage("orbitMac.allowClipboard") var allowClipboard = true
 
+    // Capability gates — what ORBIT is allowed to DO, as opposed to what it may read.
+    // Everything defaults on except Terminal, which runs arbitrary shell commands.
+    @AppStorage("orbitMac.capCalendar") var capCalendar = true
+    @AppStorage("orbitMac.capReminders") var capReminders = true
+    @AppStorage("orbitMac.capNotes") var capNotes = true
+    @AppStorage("orbitMac.capApps") var capApps = true
+    @AppStorage("orbitMac.capBrowser") var capBrowser = true
+    @AppStorage("orbitMac.capMedia") var capMedia = true
+    @AppStorage("orbitMac.capSystem") var capSystem = true
+    @AppStorage("orbitMac.capFiles") var capFiles = true
+    @AppStorage("orbitMac.capSmartHome") var capSmartHome = true
+    @AppStorage("orbitMac.capTerminal") var capTerminal = false
+
     @ObservedObject var speech = OrbitVoiceKit.shared.speech
     @ObservedObject var speechInput = OrbitVoiceKit.shared.speechInput
     @ObservedObject var graphSession = OrbitGraphSession.shared

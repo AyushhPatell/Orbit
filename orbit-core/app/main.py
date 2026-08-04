@@ -156,9 +156,22 @@ async def run_memory_extraction(session_id: str) -> int:
     except ValueError:
         cursor = memory.latest_turn_id(session_id)
 
-    new_turns = memory.turns_after(session_id, cursor, limit=memory_extraction.MAX_TURNS_PER_RUN)
-    if len(new_turns) < memory_extraction.MIN_NEW_TURNS:
+    tagged = memory.turns_after_with_context(
+        session_id, cursor, limit=memory_extraction.MAX_TURNS_PER_RUN
+    )
+    if len(tagged) < memory_extraction.MIN_NEW_TURNS:
         return 0
+    new_turns = [(tid, role, content) for tid, role, content, _ in tagged]
+
+    # Provenance rule, enforced here rather than asked of the model: turns captured while
+    # someone else was in the room may contain THEIR voice, not his. "Meet my friend Shruti
+    # she's listening" was stored as a fact about Ayush's relationships; a microphone cannot
+    # tell who spoke. Those turns are excluded from personal-knowledge extraction entirely —
+    # if it is really a fact about him, he will say it again when it is just the two of them.
+    # Life events still come through: the situation is real either way.
+    company_turn_ids = {tid for tid, _, _, ctx in tagged if ctx != "alone"}
+    knowledge_turns = [t for t in new_turns if t[0] not in company_turn_ids]
+    knowledge_allowed = len(knowledge_turns) >= max(2, memory_extraction.MIN_NEW_TURNS // 2)
 
     try:
         result = await memory_extraction.extract_memories(
@@ -174,9 +187,28 @@ async def run_memory_extraction(session_id: str) -> int:
     if result is None:
         return 0
 
+    from datetime import datetime as _dt
+    span = f"{new_turns[0][0]}-{new_turns[-1][0]}"
+    context_label = "company" if company_turn_ids else "alone"
+    provenance = json.dumps({
+        "source": "llm-extraction",
+        "turns": span,
+        "context": context_label,
+        "at": _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
     stored = 0
-    for item in result["knowledge"]:
-        memory.add_personal_knowledge(item["category"], item["fact"], item["importance"], "llm-extraction")
+    knowledge_items = result["knowledge"] if knowledge_allowed else []
+    if result["knowledge"] and not knowledge_allowed:
+        logger.info(
+            "memory extraction: skipped %d knowledge items — company was present",
+            len(result["knowledge"]),
+        )
+    for item in knowledge_items:
+        memory.add_personal_knowledge(
+            item["category"], item["fact"], item["importance"], "llm-extraction",
+            provenance=provenance,
+        )
         # Mirror into semantic memory so recall can surface it by meaning, not just category.
         memory.add_semantic_memory(item["fact"], source="auto", importance=item["importance"])
         stored += 1
@@ -189,6 +221,7 @@ async def run_memory_extraction(session_id: str) -> int:
             importance=item["importance"],
             occurs_at=_resolve_occurs_at(item["event_date"], item.get("at")),
             duration_minutes=item.get("duration_minutes") or 60,
+            provenance=provenance,
         )
         stored += 1
 
@@ -2344,8 +2377,11 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     user_for_store = content_for_storage(corrected_message, redact_local_storage=s.redact_local_storage)
     reply_for_store = content_for_storage(reply, redact_local_storage=s.redact_local_storage)
     if payload.save_memory:
-        memory.append_turn(payload.session_id, "user", user_for_store)
-        memory.append_turn(payload.session_id, "assistant", reply_for_store)
+        # Who was in the room is part of the record. Without it, nothing downstream can tell
+        # his voice from a guest's, and a guest's words become facts about him.
+        turn_context = "company" if company_context else "alone"
+        memory.append_turn(payload.session_id, "user", user_for_store, context=turn_context)
+        memory.append_turn(payload.session_id, "assistant", reply_for_store, context=turn_context)
     update_style_preferences_from_user_message(payload.message)
     if payload.save_memory and s.semantic_memory_enabled:
         source_text = user_for_store if s.redact_local_storage else corrected_message
