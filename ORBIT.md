@@ -1741,6 +1741,46 @@ tools ungated, defaults verified, refusal wording checked for blame-free languag
 Verified: **216 pytest**, seven corpora, clean xcodebuild, migration applied to the live DB
 with all rows intact. **Xcode rebuild required.**
 
+### Phase 3.33 — DONE (2026-08-04): ORBIT was interrupting itself, in a loop
+
+Ayush: ORBIT speaks, cuts off mid-sentence, speaks again — three times, the same thing worded
+differently each time. **Diagnosed from the barge-in trace on his own machine**, not guessed:
+
+```
+ignored   "Just thinking this is a good time to unwind and let your thoughts wander a bit."
+INTERRUPT ← heard "Sometimes the quiet"        ← ORBIT's OWN next sentence
+armed …
+INTERRUPT ← heard "The nud"
+armed …
+INTERRUPT ← heard "The quiet"
+```
+
+Every one of those is **ORBIT interrupting ORBIT**. The echo filter caught the long matching
+phrases, but the *opening words of each new sentence* reached the mic before `lastSpokenText`
+had caught up. Content matching can never win that race — the microphone is always slightly
+ahead of what the app thinks it is saying. Each false interrupt then opened the mic, ORBIT's
+continuing speech was captured as a message, the brain answered, and it looped. Three
+different wordings because they were three genuine round trips.
+
+**Fixes, both narrowing and structural:**
+
+1. **Only an explicit stop word can interrupt.** The old rule was "any two words that aren't
+   echo", which was never survivable without a reference signal. Checked against the whole
+   trace: **zero** false triggers were stop words, and every real interruption Ayush made was.
+2. **"quiet" and "enough" were removed from the stop-word list.** They caused two of the three
+   loops — ORBIT was mid-sentence saying *"…the quiet moments…"*. A word ORBIT uses
+   conversationally is not a stop word. `be quiet` survives; the bare adjective does not.
+   Trigger phrases are now capped at **two words** ("Sometimes the quiet" was three).
+3. **A 12-second cooldown makes a cascade impossible.** Narrowing makes a false trigger
+   unlikely; the cooldown means that even if one happens, it cannot chain. Whatever else
+   changes here later, barge-in can never fire twice in quick succession again.
+
+**The honest cost, stated plainly:** he can *stop* ORBIT, but he cannot talk over it with an
+arbitrary sentence. That needs hardware echo cancellation, which Phase 3.29 proved impossible
+on this architecture. Stop-on-command is the whole feature now.
+
+The three real transcripts are pinned in the corpus, so this exact loop cannot return.
+
 ### Next phases (in order)
 2. **STT replacement research** — Apple STT is the root of the mishear pain; evaluate WhisperKit /
    whisper.cpp (large-v3-turbo) on Apple Silicon for Indian-accent accuracy. This kills the alias

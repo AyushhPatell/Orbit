@@ -301,6 +301,11 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
             OrbitBargeIn.log("NOT ARMED — mic already in use")
             return
         }
+        // Never arm again straight after an interrupt: that is the cascade.
+        guard !OrbitBargeIn.isInCooldown else {
+            OrbitBargeIn.log("NOT ARMED — cooling down after the last interrupt")
+            return
+        }
         do {
             try await requestAuthorization()
         } catch {
@@ -317,6 +322,7 @@ final class OrbitSpeechInputController: NSObject, ObservableObject {
                     guard !trimmed.isEmpty else { return }
                     if OrbitBargeIn.shouldInterrupt(transcript: trimmed, spokenText: said) {
                         fired = true
+                        OrbitBargeIn.noteInterrupt()
                         OrbitBargeIn.log("INTERRUPT ← heard \"\(trimmed)\"")
                         onInterrupt(trimmed)
                     } else {

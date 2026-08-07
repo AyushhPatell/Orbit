@@ -29,6 +29,31 @@ enum OrbitBargeIn {
         UserDefaults.standard.bool(forKey: "orbitMac.allowBargeIn")
     }
 
+    // MARK: - Loop breaker
+    //
+    // A false interrupt is survivable; a false interrupt that CASCADES is not. In the field
+    // trace ORBIT cut itself off, the open mic captured its own continuing speech as a
+    // message, the brain answered, ORBIT spoke again, and it interrupted itself again —
+    // three times in seventeen seconds. Narrowing the trigger makes that unlikely; this makes
+    // it impossible. Whatever else changes, barge-in can never fire twice in quick succession.
+
+    private static var lastInterruptAt: Date?
+    private static let cooldownSeconds: TimeInterval = 12
+
+    static var isInCooldown: Bool {
+        guard let last = lastInterruptAt else { return false }
+        return Date().timeIntervalSince(last) < cooldownSeconds
+    }
+
+    static func noteInterrupt() {
+        lastInterruptAt = Date()
+    }
+
+    /// Test seam — the cooldown is process state, so it has to be resettable.
+    static func resetCooldown() {
+        lastInterruptAt = nil
+    }
+
     // MARK: - Diagnostics
     //
     // The first field test failed completely — saying "stop" over and over did nothing — and
@@ -96,39 +121,60 @@ enum OrbitBargeIn {
 
     /// Short, unambiguous interruptions that must ALWAYS cut ORBIT off, even if the same word
     /// appears in what it is saying. "Stop" is the one thing that can never be ignored.
+    /// Words that essentially never appear inside a normal ORBIT reply.
+    ///
+    /// "quiet", "enough", "cancel" and "pause" were here and had to come out: the field trace
+    /// caught **"The quiet"** and **"Sometimes the quiet"** cutting ORBIT off, because it was
+    /// mid-sentence saying "…the quiet moments…". A stop word that ORBIT uses conversationally
+    /// is not a stop word. "be quiet" survives — the two-word form is an instruction, the bare
+    /// adjective is not.
     static let stopWords: Set<String> = [
-        "stop", "wait", "hold on", "hang on", "shut up", "quiet", "enough",
-        "no no", "pause", "cancel", "shush", "hush", "nevermind", "never mind",
+        "stop", "wait", "shut up", "shush", "hush", "hold on", "hang on",
+        "be quiet", "stop it", "stop talking", "never mind", "nevermind",
     ]
 
     static func isStopCommand(_ transcript: String) -> Bool {
         let t = normalized(transcript)
         guard !t.isEmpty else { return false }
         if stopWords.contains(t) { return true }
-        // "stop stop", "okay stop", "no wait" — a stop word inside a very short utterance.
+        // At most two words. "Sometimes the quiet" is three and was interrupting ORBIT
+        // mid-reply; a real interruption is one or two words shouted over the top.
         let words = t.split(separator: " ").map(String.init)
-        guard words.count <= 3 else { return false }
+        guard words.count <= 2 else { return false }
         return words.contains { stopWords.contains($0) }
     }
 
     /// Should this transcript interrupt ORBIT mid-sentence?
     ///
-    /// Deliberately conservative. A false interruption chops ORBIT off for a cough or a
-    /// stray word from the room, which is far more irritating than having to wait — so
-    /// filler is ignored, echo is ignored, and a single vague word is not enough.
+    /// **Only an explicit stop word. Nothing else.** This was once "any two words that
+    /// aren't echo", and the field trace shows precisely why that could never work:
+    ///
+    ///     ignored   "Just thinking this is a good time to unwind…"   ← echo caught
+    ///     INTERRUPT ← heard "Sometimes the quiet"                    ← ORBIT's NEXT sentence
+    ///     armed …
+    ///     INTERRUPT ← heard "The nud"
+    ///     INTERRUPT ← heard "The quiet"
+    ///
+    /// Every one of those is ORBIT interrupting itself. The echo filter caught the long
+    /// matching phrases, but the *opening words of each new sentence* arrived before
+    /// `lastSpokenText` had caught up — and content matching can never win that race, because
+    /// the microphone is always slightly ahead of what the app thinks it is saying. Each
+    /// false interrupt then opened the mic, ORBIT's continuing speech was captured as a
+    /// message, the brain answered again, and it looped.
+    ///
+    /// With hardware echo cancellation ruled out (Phase 3.29 — VPIO cannot run on an
+    /// input-only engine), a stop word is the only signal narrow enough to be safe. Checked
+    /// against that entire trace: **zero** of the false triggers were stop words, and every
+    /// real interruption Ayush made was one.
+    ///
+    /// The cost is honest and worth stating: he can stop ORBIT, but he cannot yet talk over
+    /// it with an arbitrary sentence. That needs a reference signal this architecture does
+    /// not have.
     static func shouldInterrupt(transcript: String, spokenText: String) -> Bool {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-
-        // "Stop" always wins, before any echo check.
-        if isStopCommand(trimmed) { return true }
-
-        // Thinking sounds are not an interruption — the same rule as committing.
-        if OrbitUtteranceCleanup.isFillerOnly(trimmed) { return false }
-        if isEcho(transcript: trimmed, spokenText: spokenText) { return false }
-
-        // Two real words or more: he is saying something, not clearing his throat.
-        let words = normalized(trimmed).split(separator: " ")
-        return words.count >= 2
+        guard isStopCommand(trimmed) else { return false }
+        // Even a stop word is ignored if ORBIT is the one saying it.
+        return !isEcho(transcript: trimmed, spokenText: spokenText)
     }
 }
